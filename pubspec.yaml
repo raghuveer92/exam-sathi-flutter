@@ -1,0 +1,59 @@
+name: student_app_flutter
+description: ExamSaathi - Student Study Tracking Mobile App
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State Management
+  flutter_bloc: ^8.1.6
+  bloc: ^8.1.4
+  equatable: ^2.0.5
+
+  # Navigation
+  go_router: ^14.2.0
+
+  # Networking
+  dio: ^5.4.3+1
+  retrofit: ^4.1.0
+  json_annotation: ^4.9.0
+
+  # Local Storage
+  shared_preferences: ^2.3.0
+  flutter_secure_storage: ^9.2.2
+
+  # UI Packages
+  fl_chart: ^0.68.0
+  percent_indicator: ^4.2.3
+  shimmer: ^3.0.0
+  cached_network_image: ^3.3.1
+  lottie: ^3.1.0
+
+  # Utilities
+  intl: ^0.19.0
+  get_it: ^7.7.0
+  freezed_annotation: ^2.4.4
+  logger: ^2.4.0
+
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  build_runner: ^2.4.10
+  json_serializable: ^6.8.0
+  freezed: ^2.5.2
+  retrofit_generator: ^8.1.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/animations/
+    - assets/icons/
