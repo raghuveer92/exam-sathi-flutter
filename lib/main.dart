@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
@@ -13,10 +15,30 @@ import 'presentation/blocs/dashboard/dashboard_bloc.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await FirebaseInitializer.initialize();
-  await setupDependencies();
-  runApp(const ExamSaathiApp());
+
+  // Catch all Flutter framework errors and show them on-screen
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    _fatalError = '${details.exceptionAsString()}\n\n${details.stack}';
+  };
+
+  // Catch async errors outside Flutter framework (e.g. during startup)
+  PlatformDispatcher.instance.onError = (error, stack) {
+    _fatalError = '$error\n\n$stack';
+    runApp(_CrashScreen(error: '$error', stack: '$stack'));
+    return true;
+  };
+
+  try {
+    await FirebaseInitializer.initialize();
+    await setupDependencies();
+    runApp(const ExamSaathiApp());
+  } catch (e, stack) {
+    runApp(_CrashScreen(error: '$e', stack: '$stack'));
+  }
 }
+
+String? _fatalError;
 
 class ExamSaathiApp extends StatefulWidget {
   const ExamSaathiApp({super.key});
@@ -62,6 +84,60 @@ class _ExamSaathiAppState extends State<ExamSaathiApp> {
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme,
           routerConfig: _router,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Crash screen shown when startup fails ────────────────────────────────────
+class _CrashScreen extends StatelessWidget {
+  final String error;
+  final String stack;
+  const _CrashScreen({required this.error, required this.stack});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: const Color(0xFF1A1A2E),
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.bug_report, color: Colors.redAccent, size: 48),
+                const SizedBox(height: 12),
+                const Text(
+                  'App crashed on startup',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade900.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    error,
+                    style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  stack,
+                  style: const TextStyle(color: Colors.white60, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
