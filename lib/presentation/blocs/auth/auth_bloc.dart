@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 
@@ -17,6 +18,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<AuthLoginRequested>(_onLoginRequested);
     on<AuthRegisterRequested>(_onRegisterRequested);
     on<AuthLogoutRequested>(_onLogoutRequested);
+    on<AuthUserUpdated>((event, emit) => emit(AuthAuthenticated(user: event.user)));
   }
 
   Future<void> _onCheckRequested(
@@ -79,8 +81,11 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   }
 
   String _parseError(Object e) {
-    return e.toString().contains('message')
-        ? e.toString()
-        : 'Something went wrong. Please try again.';
+    if (e is DioException && e.message != null && e.message!.isNotEmpty) {
+      return e.message!;
+    }
+    final s = e.toString();
+    if (s.contains('Exception: ')) return s.split('Exception: ').last.trim();
+    return 'Something went wrong. Please try again.';
   }
 }

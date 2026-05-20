@@ -1,3 +1,4 @@
+import '../models/subject_detail_model.dart';
 import '../models/topic_model.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
@@ -11,6 +12,11 @@ class ProgressRepository {
     final response = await _client.dio.get(ApiEndpoints.topicsByChapter(chapterId));
     final list = response.data['data'] as List<dynamic>;
     return list.map((e) => TopicModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<SubjectDetailModel> getSubjectDetail(int subjectId) async {
+    final response = await _client.dio.get(ApiEndpoints.subjectDetail(subjectId));
+    return SubjectDetailModel.fromJson(response.data['data'] as Map<String, dynamic>);
   }
 
   Future<void> markTopicComplete({

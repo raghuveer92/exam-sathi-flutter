@@ -12,11 +12,13 @@ class ApiClient {
   final Dio _dio;
   final FlutterSecureStorage _storage;
   final Logger _logger;
+  final void Function()? onUnauthorized;
 
   ApiClient({
     Dio? dio,
     FlutterSecureStorage? storage,
     Logger? logger,
+    this.onUnauthorized,
   })  : _storage = storage ?? const FlutterSecureStorage(),
         _logger = logger ?? Logger(),
         _dio = dio ??
@@ -45,9 +47,25 @@ class ApiClient {
         _logger.d('← ${response.statusCode} ${response.requestOptions.path}');
         handler.next(response);
       },
-      onError: (error, handler) {
+      onError: (error, handler) async {
         _logger.e('API Error: ${error.message}', error: error);
-        handler.next(error);
+        final statusCode = error.response?.statusCode;
+        if (statusCode == 401 || statusCode == 403) {
+          await _storage.delete(key: _tokenKey);
+          onUnauthorized?.call();
+        }
+        final data = error.response?.data;
+        final msg = (data is Map<String, dynamic>) ? data['message'] as String? : null;
+        if (msg != null) {
+          handler.reject(DioException(
+            requestOptions: error.requestOptions,
+            response: error.response,
+            message: msg,
+            type: error.type,
+          ));
+        } else {
+          handler.next(error);
+        }
       },
     ));
   }

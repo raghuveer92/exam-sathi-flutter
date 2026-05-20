@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/firebase/analytics_service.dart';
 import '../../../data/models/exam_model.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 import '../../blocs/auth/auth_bloc.dart';
@@ -28,13 +30,13 @@ class _ExamSelectionScreenState extends State<ExamSelectionScreen> {
 
   Future<void> _loadExams() async {
     try {
-      final repo = context.read<DashboardRepository>();
+      final repo = GetIt.I<DashboardRepository>();
       final exams = await repo.getExams();
       setState(() {
         _exams = exams;
         _loading = false;
       });
-    } catch (_) {
+    } catch (e) {
       setState(() => _loading = false);
     }
   }
@@ -42,9 +44,24 @@ class _ExamSelectionScreenState extends State<ExamSelectionScreen> {
   Future<void> _confirm() async {
     if (_selected == null) return;
     try {
-      final repo = context.read<DashboardRepository>();
+      final repo = GetIt.I<DashboardRepository>();
       await repo.selectExam(_selected!);
-      if (mounted) context.go('/home');
+      if (mounted) {
+        final exam = _exams.firstWhere((e) => e.id == _selected);
+        AnalyticsService.logExamSelected(examId: exam.id, examName: exam.name);
+        final authState = context.read<AuthBloc>().state;
+        if (authState is AuthAuthenticated) {
+          context.read<AuthBloc>().add(AuthUserUpdated(
+                user: authState.user.copyWith(
+                  selectedExamId: exam.id,
+                  selectedExamName: exam.name,
+                ),
+              ));
+          // refreshListenable fires → router redirects to /exam-goal
+        } else {
+          context.go('/exam-goal', extra: exam);
+        }
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

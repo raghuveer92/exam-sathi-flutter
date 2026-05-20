@@ -12,6 +12,10 @@ class TopicModel extends Equatable {
   final bool isActive;
   final bool isCompleted;
   final double actualHours;
+  /// NOT_STARTED | IN_PROGRESS | COMPLETED
+  final String status;
+  final String? completedAt;
+  final String? lastStudiedAt;
 
   const TopicModel({
     required this.id,
@@ -25,6 +29,9 @@ class TopicModel extends Equatable {
     this.isActive = true,
     this.isCompleted = false,
     this.actualHours = 0.0,
+    this.status = 'NOT_STARTED',
+    this.completedAt,
+    this.lastStudiedAt,
   });
 
   factory TopicModel.fromJson(Map<String, dynamic> json) => TopicModel(
@@ -39,9 +46,12 @@ class TopicModel extends Equatable {
         isActive: (json['isActive'] as bool?) ?? true,
         isCompleted: (json['isCompleted'] as bool?) ?? false,
         actualHours: ((json['actualHours'] as num?) ?? 0.0).toDouble(),
+        status: (json['status'] as String?) ?? 'NOT_STARTED',
+        completedAt: json['completedAt'] as String?,
+        lastStudiedAt: json['lastStudiedAt'] as String?,
       );
 
-  TopicModel copyWith({bool? isCompleted, double? actualHours}) => TopicModel(
+  TopicModel copyWith({bool? isCompleted, double? actualHours, String? status}) => TopicModel(
         id: id,
         chapterId: chapterId,
         chapterTitle: chapterTitle,
@@ -53,8 +63,11 @@ class TopicModel extends Equatable {
         isActive: isActive,
         isCompleted: isCompleted ?? this.isCompleted,
         actualHours: actualHours ?? this.actualHours,
+        status: status ?? this.status,
+        completedAt: completedAt,
+        lastStudiedAt: lastStudiedAt,
       );
 
   @override
-  List<Object?> get props => [id, title, isCompleted];
+  List<Object?> get props => [id, title, isCompleted, status, actualHours];
 }

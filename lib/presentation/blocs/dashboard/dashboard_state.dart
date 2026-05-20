@@ -1,5 +1,7 @@
 part of 'dashboard_bloc.dart';
 
+enum SaveStatus { idle, pending, saving, saved }
+
 abstract class DashboardState extends Equatable {
   const DashboardState();
   @override
@@ -11,9 +13,21 @@ class DashboardLoading extends DashboardState {}
 
 class DashboardLoaded extends DashboardState {
   final DashboardModel dashboard;
-  const DashboardLoaded({required this.dashboard});
+  final SaveStatus saveStatus;
+
+  const DashboardLoaded({
+    required this.dashboard,
+    this.saveStatus = SaveStatus.idle,
+  });
+
+  DashboardLoaded copyWith({DashboardModel? dashboard, SaveStatus? saveStatus}) =>
+      DashboardLoaded(
+        dashboard: dashboard ?? this.dashboard,
+        saveStatus: saveStatus ?? this.saveStatus,
+      );
+
   @override
-  List<Object?> get props => [dashboard];
+  List<Object?> get props => [dashboard, saveStatus];
 }
 
 class DashboardError extends DashboardState {

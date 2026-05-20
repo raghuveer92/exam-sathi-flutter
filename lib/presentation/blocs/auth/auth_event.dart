@@ -32,3 +32,12 @@ class AuthRegisterRequested extends AuthEvent {
 }
 
 class AuthLogoutRequested extends AuthEvent {}
+
+/// Locally updates the authenticated user without a network round-trip.
+/// Use after mutations (selectExam, setExamGoal) to keep router state in sync.
+class AuthUserUpdated extends AuthEvent {
+  final UserModel user;
+  const AuthUserUpdated({required this.user});
+  @override
+  List<Object?> get props => [user];
+}

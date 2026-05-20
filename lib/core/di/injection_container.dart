@@ -21,6 +21,12 @@ Future<void> setupDependencies() async {
   sl.registerLazySingleton<ApiClient>(() => ApiClient(
         storage: sl<FlutterSecureStorage>(),
         logger: sl<Logger>(),
+        // On 401/403, auto-logout: lazily resolved so no circular dependency
+        onUnauthorized: () {
+          try {
+            sl<AuthBloc>().add(AuthLogoutRequested());
+          } catch (_) {}
+        },
       ));
 
 
@@ -33,7 +39,7 @@ Future<void> setupDependencies() async {
       () => ProgressRepository(client: sl<ApiClient>()));
 
   // ── BLoCs ─────────────────────────────────────────────────────────────────
-  sl.registerFactory<AuthBloc>(
+  sl.registerLazySingleton<AuthBloc>(
       () => AuthBloc(authRepository: sl<AuthRepository>()));
   sl.registerFactory<DashboardBloc>(
       () => DashboardBloc(repository: sl<DashboardRepository>()));

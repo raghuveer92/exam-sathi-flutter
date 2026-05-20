@@ -1,6 +1,7 @@
 import '../models/dashboard_model.dart';
 import '../models/exam_model.dart';
 import '../models/subject_model.dart';
+import '../models/user_model.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
 
@@ -22,6 +23,26 @@ class DashboardRepository {
 
   Future<void> selectExam(int examId) async {
     await _client.dio.patch(ApiEndpoints.selectExam(examId));
+  }
+
+  Future<UserModel> setExamGoal({
+    required DateTime examDate,
+    DateTime? syllabusTargetDate,
+  }) async {
+    final body = {
+      'examDate': examDate.toIso8601String().substring(0, 10),
+      if (syllabusTargetDate != null)
+        'syllabusTargetDate': syllabusTargetDate.toIso8601String().substring(0, 10),
+    };
+    final response = await _client.dio.post(ApiEndpoints.examGoal, data: body);
+    return UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
+  }
+
+  Future<void> updateStudyHours(double dailyTargetHours) async {
+    await _client.dio.patch(
+      ApiEndpoints.studyHours,
+      data: {'dailyTargetHours': dailyTargetHours},
+    );
   }
 
   Future<List<SubjectModel>> getSubjectsByExam(int examId) async {

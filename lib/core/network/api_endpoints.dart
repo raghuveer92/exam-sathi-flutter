@@ -11,6 +11,8 @@ class ApiEndpoints {
   // Student
   static const String me = '/student/me';
   static const String dashboard = '/student/dashboard';
+  static const String examGoal = '/student/exam-goal';
+  static const String studyHours = '/student/study-hours';
   static String selectExam(int examId) => '/student/exam/$examId';
 
   // Exams
@@ -30,5 +32,6 @@ class ApiEndpoints {
   static const String updateProgress = '/progress/topic';
   static const String logStudy = '/progress/log';
   static const String weeklyLogs = '/progress/weekly';
+  static String subjectDetail(int subjectId) => '/progress/subject/$subjectId';
   static String subjectProgress(int examId) => '/progress/subjects/$examId';
 }

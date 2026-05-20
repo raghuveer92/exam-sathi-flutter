@@ -6,6 +6,7 @@ class DashboardModel extends Equatable {
   final UserModel user;
   final int studyStreakDays;
   final double overallCompletionPercent;
+  final double totalEstimatedHours;
   final int totalTopics;
   final int completedTopics;
   final int remainingTopics;
@@ -19,6 +20,7 @@ class DashboardModel extends Equatable {
     required this.user,
     required this.studyStreakDays,
     required this.overallCompletionPercent,
+    this.totalEstimatedHours = 0.0,
     required this.totalTopics,
     required this.completedTopics,
     required this.remainingTopics,
@@ -34,6 +36,8 @@ class DashboardModel extends Equatable {
         studyStreakDays: (json['studyStreakDays'] as num?)?.toInt() ?? 0,
         overallCompletionPercent:
             ((json['overallCompletionPercent'] as num?) ?? 0.0).toDouble(),
+        totalEstimatedHours:
+            ((json['totalEstimatedHours'] as num?) ?? 0.0).toDouble(),
         totalTopics: (json['totalTopics'] as num?)?.toInt() ?? 0,
         completedTopics: (json['completedTopics'] as num?)?.toInt() ?? 0,
         remainingTopics: (json['remainingTopics'] as num?)?.toInt() ?? 0,
@@ -56,7 +60,23 @@ class DashboardModel extends Equatable {
         overallCompletionPercent,
         completedTopics,
         studyStreakDays,
+        user.dailyTargetHours,
       ];
+
+  DashboardModel copyWith({UserModel? user}) => DashboardModel(
+        user: user ?? this.user,
+        studyStreakDays: studyStreakDays,
+        overallCompletionPercent: overallCompletionPercent,
+        totalEstimatedHours: totalEstimatedHours,
+        totalTopics: totalTopics,
+        completedTopics: completedTopics,
+        remainingTopics: remainingTopics,
+        todayHours: todayHours,
+        todayTopicsCompleted: todayTopicsCompleted,
+        estimatedDaysToComplete: estimatedDaysToComplete,
+        subjectProgress: subjectProgress,
+        weeklyLogs: weeklyLogs,
+      );
 }
 
 class DailyLogModel extends Equatable {

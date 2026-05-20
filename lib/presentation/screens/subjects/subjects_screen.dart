@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../data/models/subject_model.dart';
+import '../../../data/repositories/auth_repository.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 
 class SubjectsScreen extends StatefulWidget {
@@ -26,10 +27,22 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
 
   Future<void> _loadSubjects() async {
     try {
-      final repo = context.read<DashboardRepository>();
-      // Use examId from current user's selected exam
-      // For now we attempt to load from dashboard
-      setState(() => _loading = false);
+      final authRepo = GetIt.I<AuthRepository>();
+      final dashRepo = GetIt.I<DashboardRepository>();
+      final user = await authRepo.getMe();
+      final examId = user.selectedExamId;
+      if (examId == null) {
+        setState(() {
+          _error = 'No exam selected. Please select an exam first.';
+          _loading = false;
+        });
+        return;
+      }
+      final subjects = await dashRepo.getSubjectsByExam(examId);
+      setState(() {
+        _subjects = subjects;
+        _loading = false;
+      });
     } catch (e) {
       setState(() {
         _error = e.toString();

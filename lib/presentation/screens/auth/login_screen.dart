@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/firebase/analytics_service.dart';
+import '../../../core/firebase/crashlytics_service.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
@@ -41,7 +43,11 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       body: BlocConsumer<AuthBloc, AuthState>(
         listener: (context, state) {
-          if (state is AuthAuthenticated) context.go('/home');
+          if (state is AuthAuthenticated) {
+            AnalyticsService.logLogin();
+            CrashlyticsService.setUser(userId: state.user.id.toString(), email: state.user.email);
+            context.go('/home');
+          }
           if (state is AuthError) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -63,21 +69,13 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 40),
                     // Logo
                     Center(
-                      child: Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          gradient: AppColors.primaryGradient,
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: const Icon(
-                          Icons.school_rounded,
-                          size: 48,
-                          color: Colors.white,
-                        ),
+                      child: Image.asset(
+                        'assets/images/logo.png',
+                        width: 130,
+                        height: 130,
                       ),
                     ),
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 24),
                     Text(
                       'Welcome back! 👋',
                       style: Theme.of(context).textTheme.displaySmall,
