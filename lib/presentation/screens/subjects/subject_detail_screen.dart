@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:intl/intl.dart';
 
@@ -7,6 +10,7 @@ import '../../../core/firebase/analytics_service.dart';
 import '../../../data/models/subject_detail_model.dart';
 import '../../../data/models/topic_model.dart';
 import '../../../data/repositories/progress_repository.dart';
+import '../../blocs/dashboard/dashboard_bloc.dart';
 
 // ─── Topic status helper ────────────────────────────────────────────────────
 enum _TopicStatus { notStarted, inProgress, completed }
@@ -37,6 +41,23 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
   String? _error;
   final Set<int> _expanded = {};
   int? _savingTopicId;
+  // Local hours overrides for optimistic header updates before backend save
+  final Map<int, double> _localHoursMap = {};
+
+  double get _localTotalHours {
+    if (_detail == null) return 0;
+    double total = 0;
+    for (final ch in _detail!.chapters) {
+      for (final t in ch.topics) {
+        total += _localHoursMap[t.id] ?? t.actualHours;
+      }
+    }
+    return total;
+  }
+
+  void _onLocalHoursChanged(int topicId, double hours) {
+    setState(() => _localHoursMap[topicId] = hours);
+  }
 
   @override
   void initState() {
@@ -53,6 +74,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
       setState(() {
         _detail = detail;
         _loading = false;
+        _localHoursMap.clear(); // fresh backend data — drop local overrides
         if (_expanded.isEmpty) {
           for (var i = 0; i < detail.chapters.length && i < 2; i++) {
             _expanded.add(detail.chapters[i].id);
@@ -76,9 +98,25 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
         isCompleted: true,
         actualHours: hours,
       );
+      // Log study hours so dashboard todayHours is updated
+      if (hours > 0) {
+        try {
+          final prevHours = topic.actualHours;
+          final delta = hours - prevHours;
+          if (delta > 0) {
+            await GetIt.I<ProgressRepository>().logStudyHours(
+              studyDate: DateTime.now().toIso8601String().split('T')[0],
+              hoursStudied: delta,
+            );
+          }
+        } catch (_) {} // non-critical
+      }
       await _load(silent: true);
       if (!mounted) return;
       setState(() => _savingTopicId = null);
+      if (mounted) {
+        context.read<DashboardBloc>().add(DashboardRefreshRequested());
+      }
       AnalyticsService.logTopicCompleted(
         topicId: topic.id,
         topicName: topic.title,
@@ -97,13 +135,26 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
 
   Future<void> _onHoursUpdated(TopicModel topic, double hours) async {
     if (hours == topic.actualHours) return;
+    final delta = hours - topic.actualHours;
     try {
       await GetIt.I<ProgressRepository>().markTopicComplete(
         topicId: topic.id,
         isCompleted: false,
         actualHours: hours,
       );
+      // Log positive delta so dashboard todayHours is updated
+      if (delta > 0) {
+        try {
+          await GetIt.I<ProgressRepository>().logStudyHours(
+            studyDate: DateTime.now().toIso8601String().split('T')[0],
+            hoursStudied: delta,
+          );
+        } catch (_) {} // non-critical
+      }
       _load(silent: true);
+      if (mounted) {
+        context.read<DashboardBloc>().add(DashboardRefreshRequested());
+      }
       AnalyticsService.logStudyHoursAdded(
         hours: hours,
         subjectName: _detail?.subjectName ?? '',
@@ -161,7 +212,12 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
         slivers: [
           // ── Gradient Header ──────────────────────────────────────────
           SliverToBoxAdapter(
-            child: _SubjectHeader(detail: d, color: color, pct: pct),
+            child: _SubjectHeader(
+              detail: d,
+              color: color,
+              pct: pct,
+              localTotalHours: _localTotalHours,
+            ),
           ),
 
           // ── "Topics" Label ───────────────────────────────────────────
@@ -220,6 +276,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
                     }),
                     onTopicComplete: _onTopicComplete,
                     onHoursUpdated: _onHoursUpdated,
+                    onLocalHoursChanged: _onLocalHoursChanged,
                   ),
                 ),
                 childCount: d.chapters.length,
@@ -245,8 +302,12 @@ class _SubjectHeader extends StatelessWidget {
   final SubjectDetailModel detail;
   final Color color;
   final double pct;
+  final double localTotalHours;
   const _SubjectHeader(
-      {required this.detail, required this.color, required this.pct});
+      {required this.detail,
+      required this.color,
+      required this.pct,
+      required this.localTotalHours});
 
   @override
   Widget build(BuildContext context) {
@@ -362,7 +423,7 @@ class _SubjectHeader extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                '${detail.totalStudyHours.toStringAsFixed(1)}h studied',
+                '${localTotalHours.toStringAsFixed(1)}h studied',
                 style: TextStyle(
                     color: Colors.white.withOpacity(0.8), fontSize: 13),
               ),
@@ -401,7 +462,7 @@ class _SubjectHeader extends StatelessWidget {
                     _HeaderChip(
                         icon: Icons.timer_rounded,
                         label:
-                            '${detail.totalStudyHours.toStringAsFixed(1)}h studied'),
+                            '${localTotalHours.toStringAsFixed(1)}h studied'),
                   ],
                 ),
               ),
@@ -489,6 +550,7 @@ class _ChapterCard extends StatelessWidget {
   final VoidCallback onToggle;
   final Future<void> Function(TopicModel, double) onTopicComplete;
   final Future<void> Function(TopicModel, double) onHoursUpdated;
+  final void Function(int topicId, double hours) onLocalHoursChanged;
 
   const _ChapterCard({
     required this.chapter,
@@ -498,6 +560,7 @@ class _ChapterCard extends StatelessWidget {
     required this.onToggle,
     required this.onTopicComplete,
     required this.onHoursUpdated,
+    required this.onLocalHoursChanged,
   });
 
   @override
@@ -598,6 +661,7 @@ class _ChapterCard extends StatelessWidget {
                     isSaving: savingTopicId == topic.id,
                     onTopicComplete: onTopicComplete,
                     onHoursUpdated: onHoursUpdated,
+                    onLocalHoursChanged: onLocalHoursChanged,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -614,6 +678,9 @@ class _ChapterCard extends StatelessWidget {
   }
 }
 
+// ─── Hours auto-save status ───────────────────────────────────────────────────
+enum _HoursSaveStatus { idle, saving, saved }
+
 // ─── Topic Tile ──────────────────────────────────────────────────────────────
 class _TopicTile extends StatefulWidget {
   final TopicModel topic;
@@ -621,6 +688,7 @@ class _TopicTile extends StatefulWidget {
   final bool isSaving;
   final Future<void> Function(TopicModel, double) onTopicComplete;
   final Future<void> Function(TopicModel, double) onHoursUpdated;
+  final void Function(int topicId, double hours) onLocalHoursChanged;
 
   const _TopicTile({
     super.key,
@@ -629,6 +697,7 @@ class _TopicTile extends StatefulWidget {
     required this.isSaving,
     required this.onTopicComplete,
     required this.onHoursUpdated,
+    required this.onLocalHoursChanged,
   });
 
   @override
@@ -638,12 +707,22 @@ class _TopicTile extends StatefulWidget {
 class _TopicTileState extends State<_TopicTile> {
   double _localHours = 0;
   bool _showStepper = false;
+  Timer? _debounce;
+  _HoursSaveStatus _hoursSaveStatus = _HoursSaveStatus.idle;
+  Timer? _savedResetTimer;
 
   @override
   void initState() {
     super.initState();
     _localHours = widget.topic.actualHours;
     _showStepper = _statusOf(widget.topic) == _TopicStatus.inProgress;
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _savedResetTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -667,10 +746,34 @@ class _TopicTileState extends State<_TopicTile> {
     }
   }
 
-  void _inc() =>
-      setState(() => _localHours = (_localHours + 0.5).clamp(0.0, 999.0));
+  void _inc() {
+    setState(() => _localHours = (_localHours + 0.5).clamp(0.0, 999.0));
+    widget.onLocalHoursChanged(widget.topic.id, _localHours);
+    _scheduleHoursSave();
+  }
+
   void _dec() {
-    if (_localHours > 0.5) setState(() => _localHours -= 0.5);
+    if (_localHours > 0.5) {
+      setState(() => _localHours -= 0.5);
+      widget.onLocalHoursChanged(widget.topic.id, _localHours);
+      _scheduleHoursSave();
+    }
+  }
+
+  void _scheduleHoursSave() {
+    _debounce?.cancel();
+    _savedResetTimer?.cancel();
+    setState(() => _hoursSaveStatus = _HoursSaveStatus.idle);
+    _debounce = Timer(const Duration(milliseconds: 600), () async {
+      if (!mounted) return;
+      setState(() => _hoursSaveStatus = _HoursSaveStatus.saving);
+      await widget.onHoursUpdated(widget.topic, _localHours);
+      if (!mounted) return;
+      setState(() => _hoursSaveStatus = _HoursSaveStatus.saved);
+      _savedResetTimer = Timer(const Duration(seconds: 2), () {
+        if (mounted) setState(() => _hoursSaveStatus = _HoursSaveStatus.idle);
+      });
+    });
   }
 
   Future<void> _onAddStudyHours() async {
@@ -678,6 +781,7 @@ class _TopicTileState extends State<_TopicTile> {
       _showStepper = true;
       if (_localHours < 0.5) _localHours = 0.5;
     });
+    widget.onLocalHoursChanged(widget.topic.id, _localHours);
     widget.onHoursUpdated(widget.topic, _localHours);
   }
 
@@ -936,7 +1040,42 @@ class _TopicTileState extends State<_TopicTile> {
               _stepBtn(Icons.add_rounded, _inc),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
+          // Auto-save status indicator
+          if (_hoursSaveStatus == _HoursSaveStatus.saving)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                    width: 10,
+                    height: 10,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        color: widget.subjectColor.withOpacity(0.7))),
+                const SizedBox(width: 6),
+                Text('Saving…',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: widget.subjectColor.withOpacity(0.7))),
+              ],
+            )
+          else if (_hoursSaveStatus == _HoursSaveStatus.saved)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.check_circle_outline,
+                    size: 12,
+                    color: const Color(0xFF43A047).withOpacity(0.85)),
+                const SizedBox(width: 4),
+                Text('Saved',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: const Color(0xFF43A047).withOpacity(0.85))),
+              ],
+            )
+          else
+            const SizedBox(height: 2),
+          const SizedBox(height: 8),
           // Mark completed button
           ElevatedButton.icon(
             icon: widget.isSaving

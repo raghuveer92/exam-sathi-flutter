@@ -61,6 +61,9 @@ class DashboardModel extends Equatable {
         completedTopics,
         studyStreakDays,
         user.dailyTargetHours,
+        todayHours,
+        todayTopicsCompleted,
+        weeklyLogs,
       ];
 
   DashboardModel copyWith({UserModel? user}) => DashboardModel(

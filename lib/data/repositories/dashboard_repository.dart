@@ -12,7 +12,10 @@ class DashboardRepository {
 
   Future<DashboardModel> getDashboard() async {
     final response = await _client.dio.get(ApiEndpoints.dashboard);
-    return DashboardModel.fromJson(response.data['data'] as Map<String, dynamic>);
+    final data = response.data['data'] as Map<String, dynamic>;
+    // ignore: avoid_print
+    print('[DASHBOARD RAW] todayHours=${data['todayHours']} weeklyLogs=${data['weeklyLogs']}');
+    return DashboardModel.fromJson(data);
   }
 
   Future<List<ExamModel>> getExams() async {

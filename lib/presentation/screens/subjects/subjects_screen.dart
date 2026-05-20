@@ -30,6 +30,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
       final authRepo = GetIt.I<AuthRepository>();
       final dashRepo = GetIt.I<DashboardRepository>();
       final user = await authRepo.getMe();
+      if (!mounted) return;
       final examId = user.selectedExamId;
       if (examId == null) {
         setState(() {
@@ -39,11 +40,13 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
         return;
       }
       final subjects = await dashRepo.getSubjectsByExam(examId);
+      if (!mounted) return;
       setState(() {
         _subjects = subjects;
         _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _loading = false;

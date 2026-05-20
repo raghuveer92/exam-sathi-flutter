@@ -168,7 +168,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       if (dashboard.user.examDate != null) ...[
                         _ExamCountdownCard(
                           user: dashboard.user,
-                          saveStatus: loaded.saveStatus,
                         ),
                         const SizedBox(height: 16),
                       ],
@@ -246,9 +245,8 @@ class _EmptySubjectCard extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _ExamCountdownCard extends StatelessWidget {
   final UserModel user;
-  final SaveStatus saveStatus;
 
-  const _ExamCountdownCard({required this.user, required this.saveStatus});
+  const _ExamCountdownCard({required this.user});
 
   String _fmtDate(String iso) {
     try {
@@ -261,13 +259,6 @@ class _ExamCountdownCard extends StatelessWidget {
   String _fmtHours(double h) {
     final s = h.toStringAsFixed(1);
     return '${s.endsWith('.0') ? h.toInt() : s}h';
-  }
-
-  void _adjust(BuildContext context, double delta) {
-    final current = user.dailyTargetHours ?? 1.0;
-    final raw = (current + delta).clamp(0.5, 16.0);
-    final snapped = (raw * 2).round() / 2.0; // snap to 0.5 steps
-    context.read<DashboardBloc>().add(StudyHoursUpdated(snapped));
   }
 
   @override
@@ -346,10 +337,10 @@ class _ExamCountdownCard extends StatelessWidget {
             ),
           ),
 
-          // ── Right: interactive daily goal ────────────────────────────
+          // ── Right: read-only daily goal display ────────────────────────
           const SizedBox(width: 12),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.2),
               borderRadius: BorderRadius.circular(14),
@@ -366,31 +357,22 @@ class _ExamCountdownCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 6),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _HoursBtn(
-                      icon: Icons.remove,
-                      onTap: hours > 0.5 ? () => _adjust(context, -0.5) : null,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      _fmtHours(hours),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    _HoursBtn(
-                      icon: Icons.add,
-                      onTap: hours < 16.0 ? () => _adjust(context, 0.5) : null,
-                    ),
-                  ],
+                Text(
+                  _fmtHours(hours),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
-                const SizedBox(height: 5),
-                _SaveStatusChip(saveStatus: saveStatus),
+                const SizedBox(height: 2),
+                const Text(
+                  'per day',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 9,
+                  ),
+                ),
               ],
             ),
           ),

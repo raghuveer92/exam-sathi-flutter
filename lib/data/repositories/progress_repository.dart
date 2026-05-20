@@ -36,10 +36,15 @@ class ProgressRepository {
     required double hoursStudied,
     int topicsCompleted = 0,
   }) async {
-    await _client.dio.post(ApiEndpoints.logStudy, data: {
+    final body = {
       'studyDate': studyDate,
       'hoursStudied': hoursStudied,
       'topicsCompleted': topicsCompleted,
-    });
+    };
+    // ignore: avoid_print
+    print('[LOG STUDY] sending: $body');
+    final resp = await _client.dio.post(ApiEndpoints.logStudy, data: body);
+    // ignore: avoid_print
+    print('[LOG STUDY] response: ${resp.data}');
   }
 }

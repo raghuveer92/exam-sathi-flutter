@@ -26,22 +26,41 @@ class _ExamGoalSetupScreenState extends State<ExamGoalSetupScreen> {
   bool _loadingHours = true;
   bool _submitting = false;
   double? _totalHours;
+  ExamModel? _fetchedExam; // used when widget.exam is null (router redirect)
+
+  ExamModel? get _exam => widget.exam ?? _fetchedExam;
 
   @override
   void initState() {
     super.initState();
-    _loadHours();
+    _loadData();
   }
 
-  Future<void> _loadHours() async {
+  Future<void> _loadData() async {
     try {
       final repo = GetIt.I<DashboardRepository>();
-      final dashboard = await repo.getDashboard();
-      if (mounted) {
-        setState(() {
-          _totalHours = dashboard.totalEstimatedHours > 0 ? dashboard.totalEstimatedHours : null;
-          _loadingHours = false;
-        });
+      // Parallel: dashboard (for total hours) + exams list (for subjectCount when exam not passed)
+      final futures = await Future.wait([
+        repo.getDashboard(),
+        if (widget.exam == null) repo.getExams(),
+      ]);
+      if (!mounted) return;
+      final dashboard = futures[0] as dynamic;
+      setState(() {
+        _totalHours = dashboard.totalEstimatedHours > 0 ? dashboard.totalEstimatedHours : null;
+        _loadingHours = false;
+      });
+      if (widget.exam == null && futures.length > 1) {
+        final exams = futures[1] as List<ExamModel>;
+        final authState = context.read<AuthBloc>().state;
+        final selectedId = authState is AuthAuthenticated ? authState.user.selectedExamId : null;
+        if (selectedId != null && mounted) {
+          final match = exams.cast<ExamModel?>().firstWhere(
+            (e) => e?.id == selectedId,
+            orElse: () => exams.isNotEmpty ? exams.first : null,
+          );
+          setState(() => _fetchedExam = match);
+        }
       }
     } catch (_) {
       if (mounted) setState(() => _loadingHours = false);
@@ -157,8 +176,8 @@ class _ExamGoalSetupScreenState extends State<ExamGoalSetupScreen> {
   Widget build(BuildContext context) {
     final authState = context.read<AuthBloc>().state;
     final user = authState is AuthAuthenticated ? authState.user : null;
-    final examName = widget.exam?.name ?? user?.selectedExamName ?? 'Your Exam';
-    final subjectCount = widget.exam?.subjectCount;
+    final examName = _exam?.name ?? user?.selectedExamName ?? 'Your Exam';
+    final subjectCount = _exam?.subjectCount;
 
     return Scaffold(
       backgroundColor: AppColors.background,

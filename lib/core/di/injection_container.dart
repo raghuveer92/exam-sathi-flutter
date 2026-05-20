@@ -13,6 +13,9 @@ import '../../presentation/blocs/dashboard/dashboard_bloc.dart';
 Future<void> setupDependencies() async {
   final sl = GetIt.I;
 
+  // Reset on hot restart to avoid "already registered" errors in development.
+  await sl.reset();
+
   // ── Core ──────────────────────────────────────────────────────────────────
   sl.registerLazySingleton<Logger>(() => Logger());
   sl.registerLazySingleton<FlutterSecureStorage>(
