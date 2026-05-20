@@ -11,10 +11,6 @@ build/
 .env
 pubspec.lock
 
-# Firebase — sensitive files (add real versions locally, never commit)
 # android/app/google-services.json is safe to commit (Firebase key is public)
-android/keystore.properties
-android/app/keystore.jks
-android/app/*.jks
-android/app/*.keystore
+# Keystore committed for CI — rotate if app goes to Google Play
 macos/Runner/GoogleService-Info.plist
