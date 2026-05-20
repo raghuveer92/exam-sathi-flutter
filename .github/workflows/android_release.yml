@@ -30,27 +30,6 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # ── Google Services ──────────────────────────────────────────────────────
-      - name: Write google-services.json
-        run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
-
-      # ── Firebase Options ─────────────────────────────────────────────────────
-      - name: Write firebase_options.dart
-        env:
-          FIREBASE_OPTIONS_DART_B64: ${{ secrets.FIREBASE_OPTIONS_DART }}
-        run: |
-          python3 -c "
-          import base64, os
-          raw = os.environ['FIREBASE_OPTIONS_DART_B64']
-          open('lib/firebase_options.dart', 'wb').write(base64.b64decode(raw))
-          "
-
-      - name: Verify firebase_options.dart
-        run: |
-          echo "Size: $(wc -c < lib/firebase_options.dart) bytes"
-          echo "Has DefaultFirebaseOptions: $(grep -c 'DefaultFirebaseOptions' lib/firebase_options.dart)"
-          head -3 lib/firebase_options.dart
-
       # ── Keystore ─────────────────────────────────────────────────────────────
       - name: Decode & write keystore
         run: echo '${{ secrets.KEYSTORE_BASE64 }}' | base64 -d > android/app/keystore.jks

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "888079860458",
+    "project_id": "exam-saathi-student",
+    "storage_bucket": "exam-saathi-student.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:888079860458:android:71ba289626ea4af65e0d93",
+        "android_client_info": {
+          "package_name": "com.examsaathi.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBZHwL4n3ier1gewZKAkc8f3R1y_3N10Fs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
