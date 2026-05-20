@@ -32,15 +32,11 @@ jobs:
 
       # ── Google Services ──────────────────────────────────────────────────────
       - name: Write google-services.json
-        env:
-          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
-        run: printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+        run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
 
       # ── Firebase Options ─────────────────────────────────────────────────────
       - name: Write firebase_options.dart
-        env:
-          FIREBASE_OPTIONS_DART: ${{ secrets.FIREBASE_OPTIONS_DART }}
-        run: printf '%s' "$FIREBASE_OPTIONS_DART" > lib/firebase_options.dart
+        run: echo '${{ secrets.FIREBASE_OPTIONS_DART }}' | base64 -d > lib/firebase_options.dart
 
       # ── Keystore ─────────────────────────────────────────────────────────────
       - name: Decode & write keystore
