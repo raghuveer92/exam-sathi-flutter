@@ -36,7 +36,20 @@ jobs:
 
       # ── Firebase Options ─────────────────────────────────────────────────────
       - name: Write firebase_options.dart
-        run: echo '${{ secrets.FIREBASE_OPTIONS_DART }}' | base64 -d > lib/firebase_options.dart
+        env:
+          FIREBASE_OPTIONS_DART_B64: ${{ secrets.FIREBASE_OPTIONS_DART }}
+        run: |
+          python3 -c "
+          import base64, os
+          raw = os.environ['FIREBASE_OPTIONS_DART_B64']
+          open('lib/firebase_options.dart', 'wb').write(base64.b64decode(raw))
+          "
+
+      - name: Verify firebase_options.dart
+        run: |
+          echo "Size: $(wc -c < lib/firebase_options.dart) bytes"
+          echo "Has DefaultFirebaseOptions: $(grep -c 'DefaultFirebaseOptions' lib/firebase_options.dart)"
+          head -3 lib/firebase_options.dart
 
       # ── Keystore ─────────────────────────────────────────────────────────────
       - name: Decode & write keystore
