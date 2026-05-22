@@ -10,24 +10,28 @@ class StreakCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
       decoration: BoxDecoration(
-        color: AppColors.streakFire.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.streakFire.withOpacity(0.25)),
+        color: AppColors.streakFire.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.streakFire.withOpacity(0.22)),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('🔥', style: TextStyle(fontSize: 24)),
-          const SizedBox(height: 4),
+          const Text('🔥', style: TextStyle(fontSize: 18)),
+          const SizedBox(height: 6),
           Text(
             '$streak',
             style: const TextStyle(
-              fontSize: 22,
+              fontSize: 20,
               fontWeight: FontWeight.w800,
               color: AppColors.streakFire,
+              height: 1.1,
             ),
           ),
+          const SizedBox(height: 2),
           const Text(
             'Day Streak',
             style: TextStyle(

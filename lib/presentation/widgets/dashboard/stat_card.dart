@@ -21,29 +21,32 @@ class StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
       decoration: BoxDecoration(
-        color: iconColor.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: iconColor.withOpacity(0.25)),
+        color: iconColor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: iconColor.withOpacity(0.22)),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 22, color: iconColor),
-          const SizedBox(height: 4),
+          Icon(icon, size: 18, color: iconColor),
+          const SizedBox(height: 6),
           Text(
             value,
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w800,
               color: iconColor,
+              height: 1.1,
             ),
           ),
+          const SizedBox(height: 2),
           Text(
             subtitle,
-            textAlign: TextAlign.center,
             style: const TextStyle(
-              fontSize: 9,
+              fontSize: 10,
               color: AppColors.textSecondary,
               fontWeight: FontWeight.w500,
             ),

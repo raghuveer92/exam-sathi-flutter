@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/firebase/analytics_service.dart';
 import '../../presentation/blocs/auth/auth_bloc.dart';
 import '../../presentation/screens/auth/login_screen.dart';
 import '../../presentation/screens/auth/register_screen.dart';
@@ -47,6 +48,7 @@ class AppRouter {
   ) =>
       GoRouter(
     navigatorKey: rootNavigatorKey,
+    observers: [AnalyticsService.observer],
     initialLocation: '/splash',
     refreshListenable: _AuthRefreshNotifier(authBloc.stream),
     redirect: (context, state) {

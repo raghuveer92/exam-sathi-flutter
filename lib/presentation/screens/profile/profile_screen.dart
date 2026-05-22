@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/utils/responsive_helper.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
 
@@ -16,7 +17,12 @@ class ProfileScreen extends StatelessWidget {
       body: BlocBuilder<DashboardBloc, DashboardState>(
         builder: (context, state) {
           final user = state is DashboardLoaded ? state.dashboard.user : null;
-          return SingleChildScrollView(
+          return Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: ResponsiveHelper.isDesktop(context) ? 700 : double.infinity,
+              ),
+              child: SingleChildScrollView(
             padding: const EdgeInsets.all(20),
             child: Column(
               children: [
@@ -106,6 +112,8 @@ class ProfileScreen extends StatelessWidget {
                   },
                 ),
               ],
+            ),
+              ),
             ),
           );
         },

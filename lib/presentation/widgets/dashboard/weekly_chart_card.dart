@@ -1,19 +1,39 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../data/models/dashboard_model.dart';
 
-/// Bar chart showing last 7 days study hours.
+/// Bar chart always showing the last 7 days (including days with 0 hours).
 class WeeklyChartCard extends StatelessWidget {
   final List<DailyLogModel> logs;
 
   const WeeklyChartCard({super.key, required this.logs});
 
+  /// Build a 7-entry list anchored to today, filling missing days with 0h.
+  List<({DateTime date, double hours})> _buildWeek() {
+    final today = DateTime.now();
+    // Map studyDate (YYYY-MM-DD) → hours
+    final logMap = <String, double>{
+      for (final l in logs) l.studyDate: l.hoursStudied,
+    };
+    return List.generate(7, (i) {
+      final d = today.subtract(Duration(days: 6 - i));
+      final key =
+          '${d.year.toString().padLeft(4, '0')}-'
+          '${d.month.toString().padLeft(2, '0')}-'
+          '${d.day.toString().padLeft(2, '0')}';
+      return (date: d, hours: logMap[key] ?? 0.0);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final maxHours = logs.fold<double>(
-          0.0, (prev, l) => l.hoursStudied > prev ? l.hoursStudied : prev) +
-        1;
+    final week = _buildWeek();
+    final maxHours =
+        week.fold<double>(0.0, (p, e) => e.hours > p ? e.hours : p) + 1;
+    final totalHours = week.fold(0.0, (s, e) => s + e.hours);
+    final today = DateTime.now();
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -22,7 +42,9 @@ class WeeklyChartCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-              color: AppColors.shadow, blurRadius: 8, offset: const Offset(0, 2))
+              color: AppColors.shadow,
+              blurRadius: 8,
+              offset: const Offset(0, 2))
         ],
       ),
       child: Column(
@@ -34,7 +56,7 @@ class WeeklyChartCard extends StatelessWidget {
               Text('This Week',
                   style: Theme.of(context).textTheme.titleLarge),
               Text(
-                'Total: ${logs.fold(0.0, (s, l) => s + l.hoursStudied).toStringAsFixed(1)}h',
+                'Total: ${totalHours.toStringAsFixed(1)}h',
                 style: const TextStyle(
                   color: AppColors.primary,
                   fontWeight: FontWeight.w600,
@@ -44,81 +66,134 @@ class WeeklyChartCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 20),
-          SizedBox(
-            height: 120,
-            child: BarChart(
-              BarChartData(
-                maxY: maxHours,
-                barTouchData: BarTouchData(enabled: false),
-                titlesData: FlTitlesData(
-                  leftTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                  topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                  rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      getTitlesWidget: (value, meta) {
-                        final idx = value.toInt();
-                        if (idx < 0 || idx >= logs.length) {
-                          return const SizedBox.shrink();
-                        }
-                        final date = logs[idx].studyDate;
-                        final parts = date.split('-');
-                        final label = parts.length >= 3
-                            ? '${parts[2]}/${parts[1]}'
-                            : date;
-                        return Text(
-                          label,
-                          style: const TextStyle(
-                            fontSize: 9,
-                            color: AppColors.textSecondary,
-                          ),
-                        );
-                      },
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final chartHeight =
+                  constraints.maxWidth > 700 ? 200.0 : 130.0;
+              final barWidth =
+                  constraints.maxWidth > 700 ? 26.0 : 20.0;
+              return SizedBox(
+                height: chartHeight,
+                child: BarChart(
+                  BarChartData(
+                    maxY: maxHours,
+                    barTouchData: BarTouchData(
+                      enabled: true,
+                      touchTooltipData: BarTouchTooltipData(
+                        getTooltipColor: (_) =>
+                            AppColors.primary.withOpacity(0.92),
+                        tooltipRoundedRadius: 8,
+                        getTooltipItem: (group, _, rod, __) {
+                          final entry = week[group.x];
+                          final dateStr =
+                              DateFormat('d MMM').format(entry.date);
+                          return BarTooltipItem(
+                            '${entry.hours.toStringAsFixed(1)}h',
+                            const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
+                            children: [
+                              TextSpan(
+                                text: '\n$dateStr',
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.normal,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
                     ),
-                  ),
-                ),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  horizontalInterval: maxHours / 3,
-                  getDrawingHorizontalLine: (_) => const FlLine(
-                    color: AppColors.divider,
-                    strokeWidth: 1,
-                  ),
-                ),
-                borderData: FlBorderData(show: false),
-                barGroups: List.generate(logs.length, (i) {
-                  final log = logs[i];
-                  return BarChartGroupData(
-                    x: i,
-                    barRods: [
-                      BarChartRodData(
-                        toY: log.hoursStudied,
-                        gradient: LinearGradient(
-                          colors: [
-                            AppColors.primary,
-                            AppColors.secondary,
-                          ],
-                          begin: Alignment.bottomCenter,
-                          end: Alignment.topCenter,
-                        ),
-                        width: 18,
-                        borderRadius: BorderRadius.circular(6),
-                        backDrawRodData: BackgroundBarChartRodData(
-                          show: true,
-                          toY: maxHours,
-                          color: AppColors.primary.withOpacity(0.05),
+                    titlesData: FlTitlesData(
+                      leftTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false)),
+                      topTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false)),
+                      rightTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false)),
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          getTitlesWidget: (value, _) {
+                            final idx = value.toInt();
+                            if (idx < 0 || idx >= 7) {
+                              return const SizedBox.shrink();
+                            }
+                            final d = week[idx].date;
+                            final isToday = d.year == today.year &&
+                                d.month == today.month &&
+                                d.day == today.day;
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                DateFormat('E').format(d), // Mon, Tue…
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: isToday
+                                      ? FontWeight.w700
+                                      : FontWeight.normal,
+                                  color: isToday
+                                      ? AppColors.primary
+                                      : AppColors.textSecondary,
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       ),
-                    ],
-                  );
-                }),
-              ),
-            ),
+                    ),
+                    gridData: FlGridData(
+                      show: true,
+                      drawVerticalLine: false,
+                      horizontalInterval: maxHours / 4,
+                      getDrawingHorizontalLine: (_) => const FlLine(
+                        color: AppColors.divider,
+                        strokeWidth: 1,
+                      ),
+                    ),
+                    borderData: FlBorderData(show: false),
+                    barGroups: List.generate(7, (i) {
+                      final entry = week[i];
+                      final isEmpty = entry.hours == 0;
+                      return BarChartGroupData(
+                        x: i,
+                        barRods: [
+                          BarChartRodData(
+                            toY: isEmpty ? 0.0 : entry.hours,
+                            gradient: isEmpty
+                                ? null
+                                : const LinearGradient(
+                                    colors: [
+                                      AppColors.primary,
+                                      AppColors.secondary
+                                    ],
+                                    begin: Alignment.bottomCenter,
+                                    end: Alignment.topCenter,
+                                  ),
+                            color: isEmpty
+                                ? AppColors.primary.withOpacity(0.0)
+                                : null,
+                            width: barWidth,
+                            borderRadius: BorderRadius.circular(6),
+                            backDrawRodData: BackgroundBarChartRodData(
+                              show: true,
+                              toY: maxHours,
+                              color: isEmpty
+                                  ? AppColors.primary.withOpacity(0.06)
+                                  : AppColors.primary.withOpacity(0.05),
+                            ),
+                          ),
+                        ],
+                      );
+                    }),
+                  ),
+                ),
+              );
+            },
           ),
         ],
       ),

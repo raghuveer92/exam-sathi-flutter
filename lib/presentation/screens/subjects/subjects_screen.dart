@@ -3,6 +3,8 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/firebase/analytics_service.dart';
+import '../../../core/utils/responsive_helper.dart';
 import '../../../data/models/subject_model.dart';
 import '../../../data/repositories/auth_repository.dart';
 import '../../../data/repositories/dashboard_repository.dart';
@@ -22,6 +24,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.logScreenView(screenName: 'SubjectsScreen');
     _loadSubjects();
   }
 
@@ -101,8 +104,92 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
   }
 
   Widget _buildList() {
+    final isDesktop = ResponsiveHelper.isDesktop(context);
+    final hPad = ResponsiveHelper.horizontalPadding(context);
+
+    return Center(
+      child: ConstrainedBox(
+        constraints:
+            const BoxConstraints(maxWidth: ResponsiveHelper.maxContentWidth),
+        child: isDesktop
+            ? _buildDesktopGrid(hPad)
+            : _buildMobileList(hPad),
+      ),
+    );
+  }
+
+  Widget _buildDesktopGrid(double hPad) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(hPad, 24, hPad, 40),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const columns = 2;
+          const spacing = 16.0;
+          final itemWidth =
+              (constraints.maxWidth - spacing * (columns - 1)) / columns;
+          return Wrap(
+            spacing: spacing,
+            runSpacing: spacing,
+            children: _subjects.map((subject) {
+              final color = subject.color;
+              return SizedBox(
+                width: itemWidth,
+                child: GestureDetector(
+                  onTap: () => context.go('/subjects/${subject.id}'),
+                  child: Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.shadow,
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        )
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 52,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: color.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Icon(subject.icon, color: color, size: 26),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(subject.name,
+                                  style: Theme.of(context).textTheme.titleLarge),
+                              const SizedBox(height: 2),
+                              Text('${subject.topicCount} topics',
+                                  style: Theme.of(context).textTheme.bodyMedium),
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.chevron_right_rounded,
+                            color: AppColors.textHint),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildMobileList(double hPad) {
     return ListView.separated(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.fromLTRB(hPad, 16, hPad, 24),
       itemCount: _subjects.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, i) {
@@ -146,8 +233,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
                     ],
                   ),
                 ),
-                Icon(Icons.chevron_right_rounded,
-                    color: AppColors.textHint),
+                Icon(Icons.chevron_right_rounded, color: AppColors.textHint),
               ],
             ),
           ),

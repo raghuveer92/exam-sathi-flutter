@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/firebase/analytics_service.dart';
+import '../../../core/utils/responsive_helper.dart';
 import '../../../data/models/subject_detail_model.dart';
 import '../../../data/models/topic_model.dart';
 import '../../../data/repositories/progress_repository.dart';
@@ -24,6 +25,23 @@ _TopicStatus _statusOf(TopicModel t) {
 String _fmtH(double h) {
   final s = h.toStringAsFixed(1);
   return s.endsWith('.0') ? '${h.toInt()}h' : '${s}h';
+}
+
+/// Returns today's date as YYYY-MM-DD in the LOCAL timezone.
+/// Using year/month/day directly avoids toIso8601String() returning UTC on web.
+String _localTodayDate() {
+  final now = DateTime.now();
+  return '${now.year.toString().padLeft(4, '0')}-'
+      '${now.month.toString().padLeft(2, '0')}-'
+      '${now.day.toString().padLeft(2, '0')}';
+}
+
+/// Parses a backend timestamp to local DateTime.
+/// Spring Boot LocalDateTime serialises as "2026-05-22T17:00:00.000" — no Z,
+/// but the value is UTC.  Append Z so Dart treats it as UTC before converting.
+DateTime _parseBackendTimestamp(String s) {
+  final isExplicit = s.endsWith('Z') || RegExp(r'[+-]\d{2}:\d{2}$').hasMatch(s);
+  return DateTime.parse(isExplicit ? s : '${s}Z').toLocal();
 }
 
 // ─── Screen ────────────────────────────────────────────────────────────────
@@ -81,6 +99,10 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
           }
         }
       });
+      AnalyticsService.logSubjectOpened(
+        subjectId: detail.subjectId,
+        subjectName: detail.subjectName,
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -105,7 +127,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
           final delta = hours - prevHours;
           if (delta > 0) {
             await GetIt.I<ProgressRepository>().logStudyHours(
-              studyDate: DateTime.now().toIso8601String().split('T')[0],
+              studyDate: _localTodayDate(),
               hoursStudied: delta,
             );
           }
@@ -146,7 +168,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
       if (delta > 0) {
         try {
           await GetIt.I<ProgressRepository>().logStudyHours(
-            studyDate: DateTime.now().toIso8601String().split('T')[0],
+            studyDate: _localTodayDate(),
             hoursStudied: delta,
           );
         } catch (_) {} // non-critical
@@ -206,10 +228,16 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     final color = d.color;
     final pct = d.completionPercent / 100;
 
+    final isDesktop = ResponsiveHelper.isDesktop(context);
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6FA),
-      body: CustomScrollView(
-        slivers: [
+      body: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: isDesktop ? 860 : double.infinity,
+          ),
+          child: CustomScrollView(
+            slivers: [
           // ── Gradient Header ──────────────────────────────────────────
           SliverToBoxAdapter(
             child: _SubjectHeader(
@@ -292,6 +320,8 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
             ),
           ),
         ],
+          ),
+        ),
       ),
     );
   }
@@ -791,7 +821,9 @@ class _TopicTileState extends State<_TopicTile> {
       builder: (ctx) => Dialog(
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        child: Padding(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Padding(
           padding: const EdgeInsets.all(28),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -865,6 +897,7 @@ class _TopicTileState extends State<_TopicTile> {
                 ],
               ),
             ],
+          ),
           ),
         ),
       ),
@@ -1112,7 +1145,7 @@ class _TopicTileState extends State<_TopicTile> {
     String timeStr = '';
     if (completedAt != null && completedAt.isNotEmpty) {
       try {
-        final dt = DateTime.parse(completedAt).toLocal();
+        final dt = _parseBackendTimestamp(completedAt);
         final now = DateTime.now();
         final isToday = dt.year == now.year &&
             dt.month == now.month &&
@@ -1280,14 +1313,16 @@ class _SuccessDialog extends StatelessWidget {
     return Dialog(
       shape:
           RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 90,
-              height: 90,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 90,
+                height: 90,
               decoration: BoxDecoration(
                 color: const Color(0xFF43D854).withOpacity(0.12),
                 shape: BoxShape.circle,
@@ -1348,6 +1383,7 @@ class _SuccessDialog extends StatelessWidget {
               ),
             ),
           ],
+          ),
         ),
       ),
     );

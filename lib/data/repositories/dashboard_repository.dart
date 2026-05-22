@@ -5,6 +5,13 @@ import '../models/user_model.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
 
+/// Formats a DateTime to YYYY-MM-DD using local year/month/day fields.
+/// Avoids toIso8601String() which can return UTC on Flutter web.
+String _fmtLocalDate(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-'
+    '${d.month.toString().padLeft(2, '0')}-'
+    '${d.day.toString().padLeft(2, '0')}';
+
 class DashboardRepository {
   final ApiClient _client;
 
@@ -33,9 +40,9 @@ class DashboardRepository {
     DateTime? syllabusTargetDate,
   }) async {
     final body = {
-      'examDate': examDate.toIso8601String().substring(0, 10),
+      'examDate': _fmtLocalDate(examDate),
       if (syllabusTargetDate != null)
-        'syllabusTargetDate': syllabusTargetDate.toIso8601String().substring(0, 10),
+        'syllabusTargetDate': _fmtLocalDate(syllabusTargetDate),
     };
     final response = await _client.dio.post(ApiEndpoints.examGoal, data: body);
     return UserModel.fromJson(response.data['data'] as Map<String, dynamic>);

@@ -136,7 +136,9 @@ class _ExamGoalSetupScreenState extends State<ExamGoalSetupScreen> {
         if (authState is AuthAuthenticated) {
           context.read<AuthBloc>().add(AuthUserUpdated(
                 user: authState.user.copyWith(
-                  examDate: _examDate!.toIso8601String().split('T').first,
+                  examDate: '${_examDate!.year.toString().padLeft(4, '0')}-'
+                      '${_examDate!.month.toString().padLeft(2, '0')}-'
+                      '${_examDate!.day.toString().padLeft(2, '0')}',
                 ),
               ));
           // refreshListenable fires → router redirects to /home

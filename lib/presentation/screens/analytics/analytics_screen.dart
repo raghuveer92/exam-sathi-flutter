@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/firebase/analytics_service.dart';
+import '../../../core/utils/responsive_helper.dart';
 import '../../../data/models/dashboard_model.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
 import '../../widgets/dashboard/weekly_chart_card.dart';
@@ -17,6 +19,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.logScreenView(screenName: 'AnalyticsScreen');
     context.read<DashboardBloc>().add(DashboardLoadRequested());
   }
 
@@ -30,7 +33,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           final d = state.dashboard;
-          return SingleChildScrollView(
+          return Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: ResponsiveHelper.isDesktop(context) ? 900 : double.infinity,
+              ),
+              child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -107,6 +115,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   );
                 }),
               ],
+            ),
+              ),
             ),
           );
         },

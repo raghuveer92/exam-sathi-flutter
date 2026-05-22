@@ -31,6 +31,7 @@ void main() async {
 
   try {
     await FirebaseInitializer.initialize();
+    AnalyticsService.logAppOpen();
     await setupDependencies();
     runApp(const ExamSaathiApp());
   } catch (e, stack) {
