@@ -105,6 +105,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             padding: const EdgeInsets.fromLTRB(32, 40, 32, 60),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 // ─── Desktop header ─────────────────────────────────────
                 Row(
@@ -151,7 +152,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                 // ─── Stat cards row (always 3) ───────────────────────────
                 Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Expanded(
                           child: StreakCard(
