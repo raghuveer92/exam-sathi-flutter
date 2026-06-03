@@ -8,10 +8,16 @@ import '../../../core/firebase/analytics_service.dart';
 import '../../../data/models/exam_model.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 import '../../blocs/auth/auth_bloc.dart';
+import '../../blocs/dashboard/dashboard_bloc.dart';
 
 /// First screen after registration — student picks their target exam.
 class ExamSelectionScreen extends StatefulWidget {
-  const ExamSelectionScreen({super.key});
+  final bool isChangeMode;
+
+  const ExamSelectionScreen({
+    super.key,
+    this.isChangeMode = false,
+  });
 
   @override
   State<ExamSelectionScreen> createState() => _ExamSelectionScreenState();
@@ -51,13 +57,30 @@ class _ExamSelectionScreenState extends State<ExamSelectionScreen> {
         AnalyticsService.logExamSelected(examId: exam.id, examName: exam.name);
         final authState = context.read<AuthBloc>().state;
         if (authState is AuthAuthenticated) {
+          final clearGoal = widget.isChangeMode;
           context.read<AuthBloc>().add(AuthUserUpdated(
                 user: authState.user.copyWith(
                   selectedExamId: exam.id,
                   selectedExamName: exam.name,
+                  clearExamDate: clearGoal,
+                  clearSyllabusTargetDate: clearGoal,
+                  clearDaysUntilExam: clearGoal,
                 ),
               ));
-          // refreshListenable fires → router redirects to /exam-goal
+
+          context.read<DashboardBloc>().add(
+                DashboardExamChanged(
+                  examId: exam.id,
+                  examName: exam.name,
+                  clearGoal: clearGoal,
+                ),
+              );
+
+          if (widget.isChangeMode) {
+            context.read<DashboardBloc>().add(DashboardResetRequested());
+            context.go('/exam-goal', extra: exam);
+          }
+          // For onboarding flow, refreshListenable triggers navigation.
         } else {
           context.go('/exam-goal', extra: exam);
         }

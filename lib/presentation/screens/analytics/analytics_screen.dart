@@ -4,7 +4,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/firebase/analytics_service.dart';
 import '../../../core/utils/responsive_helper.dart';
-import '../../../data/models/dashboard_model.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
 import '../../widgets/dashboard/weekly_chart_card.dart';
 

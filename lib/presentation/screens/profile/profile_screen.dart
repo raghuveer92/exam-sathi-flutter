@@ -88,8 +88,8 @@ class ProfileScreen extends StatelessWidget {
                 ],
                 _ProfileTile(
                   icon: Icons.school_outlined,
-                  label: 'Change Exam',
-                  onTap: () => context.go('/select-exam'),
+                  label: 'My Exams',
+                  onTap: () => context.go('/my-exams'),
                 ),
                 _ProfileTile(
                   icon: Icons.notifications_outlined,

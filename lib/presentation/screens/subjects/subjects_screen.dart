@@ -4,9 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/firebase/analytics_service.dart';
-import '../../../core/utils/responsive_helper.dart';
 import '../../../data/models/subject_model.dart';
-import '../../../data/repositories/auth_repository.dart';
+import '../../../data/models/subject_progress_model.dart';
+import '../../../data/models/user_exam_model.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 
 class SubjectsScreen extends StatefulWidget {
@@ -16,229 +16,274 @@ class SubjectsScreen extends StatefulWidget {
   State<SubjectsScreen> createState() => _SubjectsScreenState();
 }
 
+class _ExamSubjectsGroup {
+  final UserExamModel exam;
+  final List<SubjectModel> subjects;
+  final double progress;
+  final Map<int, SubjectProgressModel> progressBySubject;
+
+  const _ExamSubjectsGroup({
+    required this.exam,
+    required this.subjects,
+    required this.progress,
+    required this.progressBySubject,
+  });
+}
+
 class _SubjectsScreenState extends State<SubjectsScreen> {
-  List<SubjectModel> _subjects = [];
+  final _repo = GetIt.I<DashboardRepository>();
+  List<_ExamSubjectsGroup> _groups = const [];
+  final Set<int> _expandedExamIds = <int>{};
   bool _loading = true;
   String? _error;
+
+  static const List<Color> _examAccents = <Color>[
+    Color(0xFF6C63FF),
+    Color(0xFFFF8A00),
+    Color(0xFF22A96B),
+    Color(0xFF3B82F6),
+  ];
 
   @override
   void initState() {
     super.initState();
     AnalyticsService.logScreenView(screenName: 'SubjectsScreen');
-    _loadSubjects();
+    _loadAll();
   }
 
-  Future<void> _loadSubjects() async {
+  Future<void> _loadAll() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      final authRepo = GetIt.I<AuthRepository>();
-      final dashRepo = GetIt.I<DashboardRepository>();
-      final user = await authRepo.getMe();
-      if (!mounted) return;
-      final examId = user.selectedExamId;
-      if (examId == null) {
-        setState(() {
-          _error = 'No exam selected. Please select an exam first.';
-          _loading = false;
-        });
-        return;
+      final exams = await _repo.getMyExams();
+      final groups = <_ExamSubjectsGroup>[];
+
+      for (final exam in exams) {
+        final results = await Future.wait([
+          _repo.getSubjectsByExam(exam.examId),
+          _repo.getSubjectProgressByExam(exam.examId),
+        ]);
+
+        final subjects = results[0] as List<SubjectModel>;
+        subjects.sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
+        final progressRows = results[1] as List<SubjectProgressModel>;
+        final progressBySubject = <int, SubjectProgressModel>{
+          for (final row in progressRows) row.subjectId: row,
+        };
+        final totalTopics = progressRows.fold<int>(0, (acc, e) => acc + e.totalTopics);
+        final completedTopics = progressRows.fold<int>(0, (acc, e) => acc + e.completedTopics);
+        final progress = totalTopics == 0 ? 0.0 : (completedTopics * 100.0 / totalTopics);
+
+        groups.add(_ExamSubjectsGroup(
+          exam: exam,
+          subjects: subjects,
+          progress: progress,
+          progressBySubject: progressBySubject,
+        ));
       }
-      final subjects = await dashRepo.getSubjectsByExam(examId);
+
+      groups.sort((a, b) {
+        final ad = a.exam.daysLeft ?? 1 << 20;
+        final bd = b.exam.daysLeft ?? 1 << 20;
+        return ad.compareTo(bd);
+      });
+
       if (!mounted) return;
       setState(() {
-        _subjects = subjects;
+        _groups = groups;
+        _expandedExamIds
+          ..clear()
+          ..addAll(groups.map((e) => e.exam.id));
         _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
         _loading = false;
+        _error = e.toString();
       });
     }
+  }
+
+  SubjectProgressModel? _progressFor(_ExamSubjectsGroup group, SubjectModel subject) {
+    return group.progressBySubject[subject.id];
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('My Subjects'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search_rounded),
-            onPressed: () {},
-          ),
-        ],
-      ),
+      backgroundColor: const Color(0xFFF7F8FC),
+      appBar: AppBar(title: const Text('Subjects')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
               ? Center(child: Text(_error!))
-              : _subjects.isEmpty
-                  ? _buildEmpty()
-                  : _buildList(),
+              : _groups.isEmpty
+                  ? const Center(child: Text('No exams found. Add exams from My Exams.'))
+                  : RefreshIndicator(
+                      onRefresh: _loadAll,
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+                        children: [
+                          for (var i = 0; i < _groups.length; i++) ...[
+                            _buildExamSection(_groups[i], i),
+                            const SizedBox(height: 14),
+                          ],
+                        ],
+                      ),
+                    ),
     );
   }
 
-  Widget _buildEmpty() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.menu_book_outlined,
-                size: 72, color: AppColors.textHint),
-            const SizedBox(height: 20),
-            Text('No subjects yet',
-                style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 8),
-            Text(
-              'Subjects will appear here once the admin configures the syllabus for your exam.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium,
+  Widget _buildExamSection(_ExamSubjectsGroup group, int index) {
+    final accent = _examAccents[index % _examAccents.length];
+    final isExpanded = _expandedExamIds.contains(group.exam.id);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE5E7F2)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+            onTap: () {
+              setState(() {
+                if (isExpanded) {
+                  _expandedExamIds.remove(group.exam.id);
+                } else {
+                  _expandedExamIds.add(group.exam.id);
+                }
+              });
+            },
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: accent.withOpacity(0.14),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(Icons.description_outlined, color: accent),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      group.exam.examName,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${group.progress.toStringAsFixed(0)}% Complete',
+                    style: TextStyle(
+                      color: accent,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    isExpanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    color: AppColors.textPrimary,
+                  ),
+                ],
+              ),
             ),
+          ),
+          if (isExpanded) ...[
+            const Divider(height: 1, color: Color(0xFFE9EAF3)),
+            for (var i = 0; i < group.subjects.length; i++) ...[
+              _buildSubjectRow(group, group.subjects[i], accent),
+              if (i != group.subjects.length - 1)
+                const Divider(height: 1, indent: 58, endIndent: 14, color: Color(0xFFEDEEF6)),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSubjectRow(
+    _ExamSubjectsGroup group,
+    SubjectModel subject,
+    Color accent,
+  ) {
+    final progress = _progressFor(group, subject);
+    final completion = progress?.completionPercent ?? 0.0;
+    final completedTopics = progress?.completedTopics ?? 0;
+    final totalTopics = progress?.totalTopics ?? subject.topicCount;
+
+    return InkWell(
+      onTap: () async {
+        if (!group.exam.isActive) {
+          await _repo.setActiveMyExam(group.exam.id);
+        }
+        if (!context.mounted) return;
+        context.go('/subjects/${subject.id}');
+      },
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+        child: Row(
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: accent.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(Icons.menu_book_outlined, size: 17, color: accent),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                subject.name,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+            Text(
+              '${completion.toStringAsFixed(0)}%',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: accent,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              '$completedTopics/$totalTopics topics',
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(width: 6),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.textHint),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildList() {
-    final isDesktop = ResponsiveHelper.isDesktop(context);
-    final hPad = ResponsiveHelper.horizontalPadding(context);
-
-    return Center(
-      child: ConstrainedBox(
-        constraints:
-            const BoxConstraints(maxWidth: ResponsiveHelper.maxContentWidth),
-        child: isDesktop
-            ? _buildDesktopGrid(hPad)
-            : _buildMobileList(hPad),
-      ),
-    );
-  }
-
-  Widget _buildDesktopGrid(double hPad) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(hPad, 24, hPad, 40),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          const columns = 2;
-          const spacing = 16.0;
-          final itemWidth =
-              (constraints.maxWidth - spacing * (columns - 1)) / columns;
-          return Wrap(
-            spacing: spacing,
-            runSpacing: spacing,
-            children: _subjects.map((subject) {
-              final color = subject.color;
-              return SizedBox(
-                width: itemWidth,
-                child: GestureDetector(
-                  onTap: () => context.go('/subjects/${subject.id}'),
-                  child: Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.shadow,
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        )
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 52,
-                          height: 52,
-                          decoration: BoxDecoration(
-                            color: color.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Icon(subject.icon, color: color, size: 26),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(subject.name,
-                                  style: Theme.of(context).textTheme.titleLarge),
-                              const SizedBox(height: 2),
-                              Text('${subject.topicCount} topics',
-                                  style: Theme.of(context).textTheme.bodyMedium),
-                            ],
-                          ),
-                        ),
-                        Icon(Icons.chevron_right_rounded,
-                            color: AppColors.textHint),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildMobileList(double hPad) {
-    return ListView.separated(
-      padding: EdgeInsets.fromLTRB(hPad, 16, hPad, 24),
-      itemCount: _subjects.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, i) {
-        final subject = _subjects[i];
-        final color = subject.color;
-        return GestureDetector(
-          onTap: () => context.go('/subjects/${subject.id}'),
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.shadow,
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                )
-              ],
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: color.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Icon(subject.icon, color: color, size: 26),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(subject.name,
-                          style: Theme.of(context).textTheme.titleLarge),
-                      Text('${subject.topicCount} topics',
-                          style: Theme.of(context).textTheme.bodyMedium),
-                    ],
-                  ),
-                ),
-                Icon(Icons.chevron_right_rounded, color: AppColors.textHint),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }

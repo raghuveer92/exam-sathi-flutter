@@ -10,6 +10,21 @@ class DashboardLoadRequested extends DashboardEvent {}
 class DashboardRefreshRequested extends DashboardEvent {}
 class DashboardResetRequested extends DashboardEvent {}
 
+class DashboardExamChanged extends DashboardEvent {
+  final int examId;
+  final String examName;
+  final bool clearGoal;
+
+  const DashboardExamChanged({
+    required this.examId,
+    required this.examName,
+    this.clearGoal = false,
+  });
+
+  @override
+  List<Object?> get props => [examId, examName, clearGoal];
+}
+
 /// User tapped [+] or [-] on daily study hours — triggers instant UI update + debounced save.
 class StudyHoursUpdated extends DashboardEvent {
   final double dailyTargetHours;

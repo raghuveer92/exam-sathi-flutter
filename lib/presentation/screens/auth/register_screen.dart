@@ -48,7 +48,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       appBar: AppBar(leading: const BackButton()),
       body: BlocConsumer<AuthBloc, AuthState>(
         listener: (context, state) {
-          if (state is AuthAuthenticated) context.go('/select-exam');
+          if (state is AuthAuthenticated) context.go('/my-exams?onboarding=1');
           if (state is AuthError) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -91,6 +91,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       label: AppStrings.email,
                       hint: 'you@example.com',
                       keyboardType: TextInputType.emailAddress,
+                      textInputAction: TextInputAction.next,
+                      onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
                       prefixIcon: Icons.email_outlined,
                       validator: (v) {
                         if (v == null || v.isEmpty) return AppStrings.fieldRequired;
@@ -104,6 +106,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       label: AppStrings.password,
                       hint: 'Min 6 characters',
                       obscureText: _obscurePassword,
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) => _register(),
                       prefixIcon: Icons.lock_outline,
                       suffixIcon: IconButton(
                         icon: Icon(

@@ -91,6 +91,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       label: AppStrings.email,
                       hint: 'you@example.com',
                       keyboardType: TextInputType.emailAddress,
+                      textInputAction: TextInputAction.next,
+                      onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
                       prefixIcon: Icons.email_outlined,
                       validator: (v) {
                         if (v == null || v.isEmpty) return AppStrings.fieldRequired;
@@ -104,6 +106,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       label: AppStrings.password,
                       hint: '••••••••',
                       obscureText: _obscurePassword,
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) => _login(),
                       prefixIcon: Icons.lock_outline,
                       suffixIcon: IconButton(
                         icon: Icon(

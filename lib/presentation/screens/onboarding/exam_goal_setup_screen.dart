@@ -8,6 +8,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../data/models/exam_model.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 import '../../blocs/auth/auth_bloc.dart';
+import '../../blocs/dashboard/dashboard_bloc.dart';
 
 /// Screen shown after exam selection — allows student to set their exam date
 /// and creates a personalised study timeline.
@@ -69,7 +70,10 @@ class _ExamGoalSetupScreenState extends State<ExamGoalSetupScreen> {
 
   int get _daysRemaining {
     if (_examDate == null) return 0;
-    return _examDate!.difference(DateTime.now()).inDays;
+    final today = DateTime.now();
+    final todayStart = DateTime(today.year, today.month, today.day);
+    final examStart = DateTime(_examDate!.year, _examDate!.month, _examDate!.day);
+    return examStart.difference(todayStart).inDays;
   }
 
   double get _dailyTarget {
@@ -93,9 +97,21 @@ class _ExamGoalSetupScreenState extends State<ExamGoalSetupScreen> {
       ),
     );
     if (picked != null && mounted) {
+      final minSyllabusDate = DateTime.now().add(const Duration(days: 1));
+      final latestSyllabusDate = picked.subtract(const Duration(days: 1));
+      DateTime? nextSyllabusDate;
+
+      if (!minSyllabusDate.isAfter(latestSyllabusDate)) {
+        final suggested = picked.subtract(const Duration(days: 30));
+        nextSyllabusDate = suggested.isBefore(minSyllabusDate) ? minSyllabusDate : suggested;
+      } else {
+        // If exam is too close, there is no valid syllabus date before exam.
+        nextSyllabusDate = null;
+      }
+
       setState(() {
         _examDate = picked;
-        _syllabusDate ??= picked.subtract(const Duration(days: 30));
+        _syllabusDate = nextSyllabusDate;
       });
     }
   }
@@ -141,7 +157,9 @@ class _ExamGoalSetupScreenState extends State<ExamGoalSetupScreen> {
                       '${_examDate!.day.toString().padLeft(2, '0')}',
                 ),
               ));
-          // refreshListenable fires → router redirects to /home
+          context.read<DashboardBloc>().add(DashboardResetRequested());
+          context.read<DashboardBloc>().add(DashboardLoadRequested());
+          context.go('/home');
         } else {
           context.go('/home');
         }
@@ -190,7 +208,7 @@ class _ExamGoalSetupScreenState extends State<ExamGoalSetupScreen> {
           icon: const Icon(Icons.arrow_back_ios_rounded, size: 20),
           color: AppColors.textPrimary,
           onPressed: () =>
-              context.canPop() ? context.pop() : context.go('/select-exam'),
+              context.canPop() ? context.pop() : context.go('/my-exams?onboarding=1'),
         ),
       ),
       body: SingleChildScrollView(

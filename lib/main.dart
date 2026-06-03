@@ -19,12 +19,10 @@ void main() async {
   // Catch all Flutter framework errors and show them on-screen
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
-    _fatalError = '${details.exceptionAsString()}\n\n${details.stack}';
   };
 
   // Catch async errors outside Flutter framework (e.g. during startup)
   PlatformDispatcher.instance.onError = (error, stack) {
-    _fatalError = '$error\n\n$stack';
     runApp(_CrashScreen(error: '$error', stack: '$stack'));
     return true;
   };
@@ -39,7 +37,6 @@ void main() async {
   }
 }
 
-String? _fatalError;
 
 class ExamSaathiApp extends StatefulWidget {
   const ExamSaathiApp({super.key});

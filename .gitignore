@@ -9,6 +9,8 @@ build/
 .idea/
 .DS_Store
 .env
+dart_defines.json
+.vscode/
 pubspec.lock
 
 # android/app/google-services.json is safe to commit (Firebase key is public)

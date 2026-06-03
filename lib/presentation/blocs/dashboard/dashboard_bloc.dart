@@ -19,6 +19,7 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
         super(DashboardInitial()) {
     on<DashboardLoadRequested>(_onLoadRequested);
     on<DashboardRefreshRequested>(_onRefreshRequested);
+      on<DashboardExamChanged>(_onExamChanged);
     on<DashboardResetRequested>((_, emit) {
       _debounce?.cancel();
       _resetTimer?.cancel();
@@ -31,6 +32,24 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
         emit((state as DashboardLoaded).copyWith(saveStatus: SaveStatus.idle));
       }
     });
+  }
+
+  void _onExamChanged(
+    DashboardExamChanged event,
+    Emitter<DashboardState> emit,
+  ) {
+    if (state is! DashboardLoaded) return;
+    final current = state as DashboardLoaded;
+    final updatedDashboard = current.dashboard.copyWith(
+      user: current.dashboard.user.copyWith(
+        selectedExamId: event.examId,
+        selectedExamName: event.examName,
+        clearExamDate: event.clearGoal,
+        clearSyllabusTargetDate: event.clearGoal,
+        clearDaysUntilExam: event.clearGoal,
+      ),
+    );
+    emit(current.copyWith(dashboard: updatedDashboard));
   }
 
   @override

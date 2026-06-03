@@ -2,7 +2,10 @@
 class ApiEndpoints {
   ApiEndpoints._();
 
-  static const String baseUrl = 'https://exam-sathi.onrender.com/api/v1';
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://exam-sathi.onrender.com/api/v1',
+  );
 
   // Auth
   static const String register = '/auth/register';
@@ -11,9 +14,13 @@ class ApiEndpoints {
   // Student
   static const String me = '/student/me';
   static const String dashboard = '/student/dashboard';
+  static const String myExams = '/student/my-exams';
   static const String examGoal = '/student/exam-goal';
   static const String studyHours = '/student/study-hours';
   static String selectExam(int examId) => '/student/exam/$examId';
+  static String myExamDate(int userExamId) => '/student/my-exams/$userExamId/date';
+  static String setActiveMyExam(int userExamId) => '/student/my-exams/$userExamId/active';
+  static String deleteMyExam(int userExamId) => '/student/my-exams/$userExamId';
 
   // Exams
   static const String exams = '/exams';

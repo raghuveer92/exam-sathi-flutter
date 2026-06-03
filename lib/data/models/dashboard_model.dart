@@ -1,6 +1,7 @@
 import 'package:equatable/equatable.dart';
 import 'subject_progress_model.dart';
 import 'user_model.dart';
+import 'user_exam_model.dart';
 
 class DashboardModel extends Equatable {
   final UserModel user;
@@ -14,6 +15,7 @@ class DashboardModel extends Equatable {
   final int todayTopicsCompleted;
   final int? estimatedDaysToComplete;
   final List<SubjectProgressModel> subjectProgress;
+  final List<UserExamModel> myExams;
   final List<DailyLogModel> weeklyLogs;
 
   const DashboardModel({
@@ -28,6 +30,7 @@ class DashboardModel extends Equatable {
     this.todayTopicsCompleted = 0,
     this.estimatedDaysToComplete,
     this.subjectProgress = const [],
+    this.myExams = const [],
     this.weeklyLogs = const [],
   });
 
@@ -49,6 +52,10 @@ class DashboardModel extends Equatable {
                     SubjectProgressModel.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             [],
+        myExams: (json['myExams'] as List<dynamic>?)
+            ?.map((e) => UserExamModel.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+          [],
         weeklyLogs: (json['weeklyLogs'] as List<dynamic>?)
                 ?.map((e) => DailyLogModel.fromJson(e as Map<String, dynamic>))
                 .toList() ??
@@ -57,10 +64,13 @@ class DashboardModel extends Equatable {
 
   @override
   List<Object?> get props => [
+      user.selectedExamId,
+      user.selectedExamName,
         overallCompletionPercent,
         completedTopics,
         studyStreakDays,
         user.dailyTargetHours,
+        myExams,
         todayHours,
         todayTopicsCompleted,
         weeklyLogs,

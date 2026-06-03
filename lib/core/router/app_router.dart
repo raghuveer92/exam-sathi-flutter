@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/firebase/analytics_service.dart';
@@ -14,6 +13,7 @@ import '../../presentation/screens/subjects/subject_detail_screen.dart';
 import '../../presentation/screens/topics/topic_list_screen.dart';
 import '../../presentation/screens/analytics/analytics_screen.dart';
 import '../../presentation/screens/profile/profile_screen.dart';
+import '../../presentation/screens/profile/my_exams_screen.dart';
 import '../../presentation/screens/onboarding/exam_selection_screen.dart';
 import '../../presentation/screens/onboarding/exam_goal_setup_screen.dart';
 import '../../data/models/exam_model.dart';
@@ -55,6 +55,11 @@ class AppRouter {
       final authState = context.read<AuthBloc>().state;
       final loc = state.matchedLocation;
       final isSplash = loc == '/splash';
+      final isSelectExam = loc == '/select-exam';
+      final isMyExams = loc == '/my-exams';
+      final isOnboardingMyExams =
+          isMyExams && state.uri.queryParameters['onboarding'] == '1';
+      final isChangeExamFlow = isSelectExam && state.uri.queryParameters['change'] == '1';
 
       if (authState is AuthLoading && !isSplash) return '/splash';
       if (authState is AuthInitial && !isSplash) return '/splash';
@@ -63,18 +68,30 @@ class AppRouter {
         final user = authState.user;
         // From splash/login/register — guide to the right step
         if (isSplash || loc == '/login' || loc == '/register') {
-          if (!user.hasSelectedExam) return '/select-exam';
-          if (!user.hasExamGoal) return '/exam-goal';
+          if (!user.hasExamGoal) return '/my-exams?onboarding=1';
           return '/home';
         }
         // Advance forward when setup step completes
         if (user.hasSelectedExam && user.hasExamGoal &&
-            (loc == '/exam-goal' || loc == '/select-exam')) return '/home';
-        if (user.hasSelectedExam && !user.hasExamGoal && loc == '/select-exam') return '/exam-goal';
+            (loc == '/exam-goal' ||
+                (isSelectExam && !isChangeExamFlow) ||
+                isOnboardingMyExams)) {
+          return '/home';
+        }
+        if (!user.hasSelectedExam && loc == '/exam-goal') {
+          return '/my-exams?onboarding=1';
+        }
+        if (!user.hasExamGoal && isSelectExam && !isChangeExamFlow) {
+          return '/my-exams?onboarding=1';
+        }
         // Block dashboard if setup incomplete
-        if (!user.hasSelectedExam && loc != '/select-exam') return '/select-exam';
-        if (user.hasSelectedExam && !user.hasExamGoal && loc != '/exam-goal') {
-          return '/exam-goal';
+        if (!user.hasSelectedExam && !isOnboardingMyExams) {
+          return '/my-exams?onboarding=1';
+        }
+        if (user.hasSelectedExam && !user.hasExamGoal &&
+            loc != '/exam-goal' &&
+            !isOnboardingMyExams) {
+          return '/my-exams?onboarding=1';
         }
       }
 
@@ -91,7 +108,12 @@ class AppRouter {
       GoRoute(path: '/splash', builder: (_, __) => const SplashScreen()),
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
-      GoRoute(path: '/select-exam', builder: (_, __) => const ExamSelectionScreen()),
+      GoRoute(
+        path: '/select-exam',
+        builder: (_, state) => ExamSelectionScreen(
+          isChangeMode: state.uri.queryParameters['change'] == '1',
+        ),
+      ),
       GoRoute(
         path: '/exam-goal',
         builder: (_, state) => ExamGoalSetupScreen(
@@ -128,6 +150,12 @@ class AppRouter {
           GoRoute(path: '/study', builder: (_, __) => const DashboardScreen()),
           GoRoute(path: '/analytics', builder: (_, __) => const AnalyticsScreen()),
           GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
+          GoRoute(
+            path: '/my-exams',
+            builder: (_, state) => MyExamsScreen(
+              isOnboarding: state.uri.queryParameters['onboarding'] == '1',
+            ),
+          ),
         ],
       ),
     ],
