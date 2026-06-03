@@ -4,12 +4,14 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../data/models/exam_subject_group_model.dart';
 import '../../../data/models/exam_model.dart';
 import '../../../data/models/user_exam_model.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
 import '../../widgets/common/gradient_button.dart';
+import '../../widgets/common/optional_subject_selection_dialog.dart';
 
 class MyExamsScreen extends StatefulWidget {
   final bool isOnboarding;
@@ -74,7 +76,7 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
           height: 64,
           padding: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
-            color: isSelected ? AppColors.primary.withOpacity(0.08) : AppColors.surface,
+            color: isSelected ? AppColors.primary.withValues(alpha: 0.08) : AppColors.surface,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: isSelected ? AppColors.primary : const Color(0xFFD8DDEA),
@@ -179,7 +181,7 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
 
     final ok = await showDialog<bool>(
       context: context,
-      barrierColor: Colors.black.withOpacity(0.45),
+      barrierColor: Colors.black.withValues(alpha: 0.45),
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setLocal) => Dialog(
@@ -193,7 +195,7 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
                   borderRadius: BorderRadius.circular(28),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.18),
+                      color: Colors.black.withValues(alpha: 0.18),
                       blurRadius: 40,
                       offset: const Offset(0, 18),
                     ),
@@ -338,8 +340,8 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
                         ),
                       ),
                       const SizedBox(height: 20),
-                      Row(
-                        children: const [
+                      const Row(
+                        children: [
                           Expanded(child: Divider(color: Color(0xFFD8DDEA), thickness: 1)),
                           Padding(
                             padding: EdgeInsets.symmetric(horizontal: 18),
@@ -407,9 +409,28 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
     );
 
     if (ok != true || selected == null) return;
-    await _repo.addMyExam(examId: selected!.id, examDate: targetDate);
+    final groups = await _repo.getExamSubjectGroups(selected!.id);
+    final selections = await _collectSelections(selected!.name, groups);
+    if (selections == null) return;
+
+    await _repo.addMyExam(
+      examId: selected!.id,
+      examDate: targetDate,
+      subjectSelections: selections,
+    );
     await _load();
     await _syncUserInState();
+  }
+
+  Future<List<Map<String, dynamic>>?> _collectSelections(
+    String examName,
+    List<ExamSubjectGroupModel> groups,
+  ) {
+    return showOptionalSubjectSelectionDialog(
+      context: context,
+      examName: examName,
+      groups: groups,
+    );
   }
 
   Future<void> _editDate(UserExamModel ue) async {
@@ -511,7 +532,7 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                   decoration: BoxDecoration(
-                                    color: AppColors.success.withOpacity(0.15),
+                                    color: AppColors.success.withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(20),
                                   ),
                                   child: const Text('Active', style: TextStyle(color: AppColors.success)),

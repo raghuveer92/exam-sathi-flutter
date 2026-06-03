@@ -5,10 +5,12 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/firebase/analytics_service.dart';
+import '../../../data/models/exam_subject_group_model.dart';
 import '../../../data/models/exam_model.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
+import '../../widgets/common/optional_subject_selection_dialog.dart';
 
 /// First screen after registration — student picks their target exam.
 class ExamSelectionScreen extends StatefulWidget {
@@ -51,21 +53,22 @@ class _ExamSelectionScreenState extends State<ExamSelectionScreen> {
     if (_selected == null) return;
     try {
       final repo = GetIt.I<DashboardRepository>();
-      await repo.selectExam(_selected!);
+      final exam = _exams.firstWhere((e) => e.id == _selected);
+      final groups = await repo.getExamSubjectGroups(exam.id);
+      final selections = await _collectSelections(exam.name, groups);
+      if (selections == null) return;
+
+      final user = await repo.addMyExam(
+        examId: exam.id,
+        subjectSelections: selections,
+      );
       if (mounted) {
-        final exam = _exams.firstWhere((e) => e.id == _selected);
         AnalyticsService.logExamSelected(examId: exam.id, examName: exam.name);
         final authState = context.read<AuthBloc>().state;
         if (authState is AuthAuthenticated) {
           final clearGoal = widget.isChangeMode;
           context.read<AuthBloc>().add(AuthUserUpdated(
-                user: authState.user.copyWith(
-                  selectedExamId: exam.id,
-                  selectedExamName: exam.name,
-                  clearExamDate: clearGoal,
-                  clearSyllabusTargetDate: clearGoal,
-                  clearDaysUntilExam: clearGoal,
-                ),
+                user: user,
               ));
 
           context.read<DashboardBloc>().add(
@@ -92,6 +95,17 @@ class _ExamSelectionScreenState extends State<ExamSelectionScreen> {
         );
       }
     }
+  }
+
+  Future<List<Map<String, dynamic>>?> _collectSelections(
+    String examName,
+    List<ExamSubjectGroupModel> groups,
+  ) {
+    return showOptionalSubjectSelectionDialog(
+      context: context,
+      examName: examName,
+      groups: groups,
+    );
   }
 
   @override
@@ -138,7 +152,7 @@ class _ExamSelectionScreenState extends State<ExamSelectionScreen> {
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 200),
                           decoration: BoxDecoration(
-                            color: isSelected ? color : color.withOpacity(0.1),
+                            color: isSelected ? color : color.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
                               color: isSelected ? color : Colors.transparent,

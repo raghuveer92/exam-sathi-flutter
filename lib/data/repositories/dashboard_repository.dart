@@ -1,4 +1,5 @@
 import '../models/dashboard_model.dart';
+import '../models/exam_subject_group_model.dart';
 import '../models/exam_model.dart';
 import '../models/subject_model.dart';
 import '../models/subject_progress_model.dart';
@@ -31,13 +32,37 @@ class DashboardRepository {
     return list.map((e) => UserExamModel.fromJson(e as Map<String, dynamic>)).toList();
   }
 
-  Future<UserModel> addMyExam({required int examId, DateTime? examDate}) async {
+  Future<UserModel> addMyExam({
+    required int examId,
+    DateTime? examDate,
+    List<Map<String, dynamic>> subjectSelections = const [],
+  }) async {
     final response = await _client.dio.post(
       ApiEndpoints.myExams,
       data: {
         'examId': examId,
         if (examDate != null) 'examDate': _fmtLocalDate(examDate),
+        if (subjectSelections.isNotEmpty) 'subjectSelections': subjectSelections,
       },
+    );
+    return UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
+  }
+
+  Future<List<ExamSubjectGroupModel>> getExamSubjectGroups(int examId) async {
+    final response = await _client.dio.get(ApiEndpoints.examSubjectGroups(examId));
+    final list = response.data['data'] as List<dynamic>;
+    return list
+        .map((item) => ExamSubjectGroupModel.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<UserModel> updateSubjectSelections(
+    int userExamId,
+    List<Map<String, dynamic>> subjectSelections,
+  ) async {
+    final response = await _client.dio.put(
+      ApiEndpoints.subjectSelections(userExamId),
+      data: subjectSelections,
     );
     return UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
   }
@@ -96,6 +121,17 @@ class DashboardRepository {
     final response = await _client.dio.get(ApiEndpoints.subjectsByExam(examId));
     final list = response.data['data'] as List<dynamic>;
     return list.map((e) => SubjectModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<List<SubjectModel>> getVisibleSubjectsByExam(int examId) async {
+    final groups = await getExamSubjectGroups(examId);
+    return groups
+        .expand(
+          (group) => group.isOptional
+              ? group.subjects.where((subject) => subject.selected)
+              : group.subjects,
+        )
+        .toList();
   }
 
   Future<List<SubjectProgressModel>> getSubjectProgressByExam(int examId) async {

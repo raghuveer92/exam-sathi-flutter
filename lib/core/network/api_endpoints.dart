@@ -18,9 +18,11 @@ class ApiEndpoints {
   static const String examGoal = '/student/exam-goal';
   static const String studyHours = '/student/study-hours';
   static String selectExam(int examId) => '/student/exam/$examId';
+  static String examSubjectGroups(int examId) => '/student/exams/$examId/subject-groups';
   static String myExamDate(int userExamId) => '/student/my-exams/$userExamId/date';
   static String setActiveMyExam(int userExamId) => '/student/my-exams/$userExamId/active';
   static String deleteMyExam(int userExamId) => '/student/my-exams/$userExamId';
+  static String subjectSelections(int userExamId) => '/student/my-exams/$userExamId/subject-selections';
 
   // Exams
   static const String exams = '/exams';

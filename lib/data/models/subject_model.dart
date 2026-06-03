@@ -12,6 +12,12 @@ class SubjectModel extends Equatable {
   final int displayOrder;
   final bool isActive;
   final int topicCount;
+  final int? groupId;
+  final String? groupName;
+  final bool? groupOptional;
+  final int? groupMinSelection;
+  final int? groupMaxSelection;
+  final bool selected;
 
   const SubjectModel({
     required this.id,
@@ -23,6 +29,12 @@ class SubjectModel extends Equatable {
     this.displayOrder = 0,
     this.isActive = true,
     this.topicCount = 0,
+    this.groupId,
+    this.groupName,
+    this.groupOptional,
+    this.groupMinSelection,
+    this.groupMaxSelection,
+    this.selected = false,
   });
 
   factory SubjectModel.fromJson(Map<String, dynamic> json) => SubjectModel(
@@ -35,6 +47,12 @@ class SubjectModel extends Equatable {
         displayOrder: (json['displayOrder'] as num?)?.toInt() ?? 0,
         isActive: (json['isActive'] as bool?) ?? true,
         topicCount: (json['topicCount'] as num?)?.toInt() ?? 0,
+        groupId: (json['groupId'] as num?)?.toInt(),
+        groupName: json['groupName'] as String?,
+        groupOptional: json['groupOptional'] as bool?,
+        groupMinSelection: (json['groupMinSelection'] as num?)?.toInt(),
+        groupMaxSelection: (json['groupMaxSelection'] as num?)?.toInt(),
+        selected: (json['selected'] as bool?) ?? false,
       );
 
   /// Parse hex color code to Flutter Color.
@@ -67,5 +85,5 @@ class SubjectModel extends Equatable {
   }
 
   @override
-  List<Object?> get props => [id, name, colorCode, iconName];
+  List<Object?> get props => [id, name, colorCode, iconName, groupId, selected];
 }

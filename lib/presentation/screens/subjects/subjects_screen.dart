@@ -62,7 +62,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
 
       for (final exam in exams) {
         final results = await Future.wait([
-          _repo.getSubjectsByExam(exam.examId),
+          _repo.getVisibleSubjectsByExam(exam.examId),
           _repo.getSubjectProgressByExam(exam.examId),
         ]);
 
