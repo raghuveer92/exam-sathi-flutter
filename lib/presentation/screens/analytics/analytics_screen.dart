@@ -6,6 +6,7 @@ import '../../../core/firebase/analytics_service.dart';
 import '../../../core/utils/responsive_helper.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
 import '../../widgets/dashboard/weekly_chart_card.dart';
+import '../mock_test/mock_test_performance_section.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key});
@@ -69,6 +70,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   const SizedBox(height: 12),
                   WeeklyChartCard(logs: d.weeklyLogs),
                 ],
+                const SizedBox(height: 20),
+                const MockTestPerformanceSection(),
                 const SizedBox(height: 20),
                 Text('Subject Progress',
                     style: Theme.of(context).textTheme.headlineSmall),

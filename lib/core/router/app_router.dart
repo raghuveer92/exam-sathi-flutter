@@ -16,6 +16,9 @@ import '../../presentation/screens/profile/profile_screen.dart';
 import '../../presentation/screens/profile/my_exams_screen.dart';
 import '../../presentation/screens/onboarding/exam_selection_screen.dart';
 import '../../presentation/screens/onboarding/exam_goal_setup_screen.dart';
+import '../../presentation/screens/mock_test/test_result_screen.dart';
+import '../../presentation/screens/mock_test/topic_test_screen.dart';
+import '../../data/models/mock_test_model.dart';
 import '../../data/models/exam_model.dart';
 import '../../presentation/screens/main/main_scaffold.dart';
 import '../../presentation/screens/splash/splash_screen.dart';
@@ -118,6 +121,21 @@ class AppRouter {
         path: '/exam-goal',
         builder: (_, state) => ExamGoalSetupScreen(
           exam: state.extra as ExamModel?,
+        ),
+      ),
+      GoRoute(
+        path: '/mock-test/:topicId',
+        builder: (_, state) => TopicTestScreen(
+          topicId: int.parse(state.pathParameters['topicId']!),
+          topicTitle: state.uri.queryParameters['title'] ?? 'Topic',
+        ),
+      ),
+      GoRoute(
+        path: '/mock-test/:topicId/result/:attemptId',
+        builder: (_, state) => TestResultScreen(
+          topicId: int.parse(state.pathParameters['topicId']!),
+          attemptId: int.parse(state.pathParameters['attemptId']!),
+          initialResult: state.extra as MockTestAttemptModel?,
         ),
       ),
 

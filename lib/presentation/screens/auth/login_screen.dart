@@ -7,6 +7,7 @@ import '../../../core/firebase/crashlytics_service.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
+import '../../../core/network/api_endpoints.dart';
 import '../../widgets/common/gradient_button.dart';
 import '../../widgets/common/app_text_field.dart';
 
@@ -22,6 +23,20 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   bool _obscurePassword = true;
+
+  static bool get _isLocalBackend {
+    const url = ApiEndpoints.baseUrl;
+    return url.contains('localhost') || url.contains('127.0.0.1');
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isLocalBackend) {
+      _emailCtrl.text = 'Raghuveer.ameta92@gmail.com';
+      _passwordCtrl.text = 'Raghu@123';
+    }
+  }
 
   @override
   void dispose() {

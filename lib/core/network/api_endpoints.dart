@@ -43,4 +43,12 @@ class ApiEndpoints {
   static const String weeklyLogs = '/progress/weekly';
   static String subjectDetail(int subjectId) => '/progress/subject/$subjectId';
   static String subjectProgress(int examId) => '/progress/subjects/$examId';
+
+  // Mock Tests
+  static String mockTestTopicInfo(int topicId) => '/mock-tests/topics/$topicId/info';
+  static String mockTestStart(int topicId) => '/mock-tests/topics/$topicId/start';
+  static String mockTestAttempts(int topicId) => '/mock-tests/topics/$topicId/attempts';
+  static String mockTestSubmit(int attemptId) => '/mock-tests/attempts/$attemptId/submit';
+  static String mockTestAttempt(int attemptId) => '/mock-tests/attempts/$attemptId';
+  static const String mockTestPerformance = '/mock-tests/performance';
 }
