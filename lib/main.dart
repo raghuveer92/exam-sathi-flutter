@@ -13,8 +13,11 @@ import 'core/theme/app_theme.dart';
 import 'presentation/blocs/auth/auth_bloc.dart';
 import 'presentation/blocs/dashboard/dashboard_bloc.dart';
 
+Object? _semanticsHandle;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  _semanticsHandle ??= WidgetsBinding.instance.ensureSemantics();
 
   // Catch all Flutter framework errors and show them on-screen
   FlutterError.onError = (details) {
@@ -120,7 +123,7 @@ class _CrashScreen extends StatelessWidget {
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.red.shade900.withOpacity(0.4),
+                    color: Colors.red.shade900.withValues(alpha: 0.4),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
