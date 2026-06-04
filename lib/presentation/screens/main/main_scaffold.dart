@@ -13,7 +13,6 @@ class MainScaffold extends StatelessWidget {
   static const _tabs = [
     '/home',
     '/subjects',
-    '/study',
     '/analytics',
     '/profile',
   ];
@@ -65,11 +64,6 @@ class MainScaffold extends StatelessWidget {
             label: 'Subjects',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.timer_outlined),
-            activeIcon: Icon(Icons.timer_rounded),
-            label: 'Study',
-          ),
-          BottomNavigationBarItem(
             icon: Icon(Icons.bar_chart_outlined),
             activeIcon: Icon(Icons.bar_chart_rounded),
             label: 'Analytics',
@@ -98,7 +92,6 @@ class _DesktopSidebar extends StatelessWidget {
   static const _navItems = [
     _NavItem(Icons.home_rounded, Icons.home_outlined, 'Home'),
     _NavItem(Icons.menu_book_rounded, Icons.menu_book_outlined, 'Subjects'),
-    _NavItem(Icons.timer_rounded, Icons.timer_outlined, 'Study'),
     _NavItem(Icons.bar_chart_rounded, Icons.bar_chart_outlined, 'Analytics'),
     _NavItem(Icons.person_rounded, Icons.person_outline_rounded, 'Profile'),
   ];

@@ -16,7 +16,7 @@ class SplashScreen extends StatelessWidget {
         if (state is AuthAuthenticated) {
           final user = state.user;
           if (!user.hasSelectedExam) {
-            context.go('/my-exams?onboarding=1');
+            context.go('/add-exam?onboarding=1');
           } else {
             context.go('/home');
           }

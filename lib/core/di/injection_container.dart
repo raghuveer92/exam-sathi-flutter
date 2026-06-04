@@ -4,6 +4,7 @@ import 'package:logger/logger.dart';
 
 import '../../data/repositories/auth_repository.dart';
 import '../../data/repositories/dashboard_repository.dart';
+import '../../data/repositories/exam_catalog_repository.dart';
 import '../../data/repositories/mock_test_repository.dart';
 import '../../data/repositories/progress_repository.dart';
 import '../network/api_client.dart';
@@ -39,6 +40,8 @@ Future<void> setupDependencies() async {
       () => AuthRepository(client: sl<ApiClient>()));
   sl.registerLazySingleton<DashboardRepository>(
       () => DashboardRepository(client: sl<ApiClient>()));
+  sl.registerLazySingleton<ExamCatalogRepository>(
+      () => ExamCatalogRepository(client: sl<ApiClient>()));
   sl.registerLazySingleton<ProgressRepository>(
       () => ProgressRepository(client: sl<ApiClient>()));
   sl.registerLazySingleton<MockTestRepository>(

@@ -28,6 +28,13 @@ class ApiEndpoints {
   static const String exams = '/exams';
   static String examById(int id) => '/exams/$id';
 
+  // Exam catalog
+  static const String examCatalog = '/exam-catalog';
+  static const String examCatalogSearch = '/exam-catalog/search';
+  static String examsByCategory(int categoryId) =>
+      '/exam-catalog/categories/$categoryId/exams';
+  static const String enrollExam = '/student/my-exams/enroll';
+
   // Subjects
   static String subjectsByExam(int examId) => '/subjects/exam/$examId';
   static String subjectById(int id) => '/subjects/$id';

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -227,17 +226,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           primary: _brandPrimary,
         ),
         const SizedBox(height: 18),
-        _WeeklyAnalyticsCard(logs: dashboard.weeklyLogs),
-        const SizedBox(height: 18),
         _SubjectsOverviewSection(
           exams: exams,
           subjectsByExam: _subjectsByExam,
           loading: _loadingSubjects,
-          primary: _brandPrimary,
-        ),
-        const SizedBox(height: 14),
-        _ManageExamsCard(
-          onTap: () => context.push('/my-exams'),
           primary: _brandPrimary,
         ),
       ],
@@ -271,11 +263,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     onViewAll: () => context.push('/my-exams'),
                     primary: _brandPrimary,
                   ),
-                  const SizedBox(height: 18),
-                  _ManageExamsCard(
-                    onTap: () => context.push('/my-exams'),
-                    primary: _brandPrimary,
-                  ),
                 ],
               ),
             ),
@@ -283,8 +270,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Expanded(
               child: Column(
                 children: [
-                  _WeeklyAnalyticsCard(logs: dashboard.weeklyLogs),
-                  const SizedBox(height: 18),
                   _SubjectsOverviewSection(
                     exams: exams,
                     subjectsByExam: _subjectsByExam,
@@ -777,175 +762,6 @@ class _ExamCard extends StatelessWidget {
   }
 }
 
-class _WeeklyAnalyticsCard extends StatelessWidget {
-  final List<DailyLogModel> logs;
-
-  const _WeeklyAnalyticsCard({required this.logs});
-
-  @override
-  Widget build(BuildContext context) {
-    final weekHours = List<double>.filled(7, 0);
-
-    for (final log in logs) {
-      try {
-        final date = DateTime.parse(log.studyDate);
-        final weekday = date.weekday; // Mon=1...Sun=7
-        weekHours[weekday - 1] += log.hoursStudied;
-      } catch (_) {}
-    }
-
-    final total = weekHours.fold<double>(0.0, (sum, h) => sum + h);
-    final avg = total / 7;
-    final maxHours = weekHours.fold<double>(0.0, math.max);
-    final top = maxHours <= 0 ? 1.0 : maxHours;
-    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 14,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            "This Week's Study",
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 160,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: List.generate(7, (index) {
-                final h = weekHours[index];
-                final height = (h / top) * 96;
-                return Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Text(
-                        '${h.toStringAsFixed(1)}h',
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: AppColors.textSecondary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                      const SizedBox(height: 6),
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        width: 16,
-                        height: height < 6 ? 6 : height,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(999),
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFFFFA143), Color(0xFFFF8A00)],
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        labels[index],
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: AppColors.textSecondary,
-                            ),
-                      ),
-                    ],
-                  ),
-                );
-              }),
-            ),
-          ),
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8F9FE),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: _SummaryMetric(
-                    icon: Icons.schedule_rounded,
-                    label: 'Total Study Time',
-                    value: '${total.toStringAsFixed(1)}h',
-                    color: const Color(0xFFFF8A00),
-                  ),
-                ),
-                Container(width: 1, height: 38, color: const Color(0xFFE5E7F0)),
-                Expanded(
-                  child: _SummaryMetric(
-                    icon: Icons.track_changes_rounded,
-                    label: 'Daily Average',
-                    value: '${avg.toStringAsFixed(1)}h',
-                    color: const Color(0xFF6C63FF),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SummaryMetric extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color color;
-
-  const _SummaryMetric({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(icon, size: 20, color: color),
-        const SizedBox(width: 8),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: AppColors.textSecondary,
-                  ),
-            ),
-            Text(
-              value,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
 class _SubjectsOverviewSection extends StatefulWidget {
   final List<UserExamModel> exams;
   final Map<int, List<SubjectProgressModel>> subjectsByExam;
@@ -1170,44 +986,6 @@ class _SubjectRow extends StatelessWidget {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ManageExamsCard extends StatelessWidget {
-  final VoidCallback onTap;
-  final Color primary;
-
-  const _ManageExamsCard({required this.onTap, required this.primary});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFE8E9F2)),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.edit_note_rounded, color: primary),
-            const SizedBox(width: 10),
-            Text(
-              'Manage Exams',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-            const Spacer(),
-            const Icon(Icons.chevron_right_rounded),
-          ],
         ),
       ),
     );

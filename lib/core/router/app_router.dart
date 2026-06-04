@@ -16,6 +16,7 @@ import '../../presentation/screens/profile/profile_screen.dart';
 import '../../presentation/screens/profile/my_exams_screen.dart';
 import '../../presentation/screens/onboarding/exam_selection_screen.dart';
 import '../../presentation/screens/onboarding/exam_goal_setup_screen.dart';
+import '../../presentation/screens/onboarding/add_exam_wizard_screen.dart';
 import '../../presentation/screens/mock_test/test_result_screen.dart';
 import '../../presentation/screens/mock_test/topic_test_screen.dart';
 import '../../data/models/mock_test_model.dart';
@@ -65,6 +66,9 @@ class AppRouter {
       final isMyExams = loc == '/my-exams';
       final isOnboardingMyExams =
           isMyExams && state.uri.queryParameters['onboarding'] == '1';
+      final isAddExamWizard = loc.startsWith('/add-exam');
+      final isOnboardingWizard =
+          isAddExamWizard && state.uri.queryParameters['onboarding'] == '1';
       final isChangeExamFlow = isSelectExam && state.uri.queryParameters['change'] == '1';
 
       if (authState is AuthLoading && !isSplash && !isAuthForm) return '/splash';
@@ -76,30 +80,32 @@ class AppRouter {
         final user = authState.user;
         // From splash/login/register — guide to the right step
         if (isSplash || loc == '/login' || loc == '/register') {
-          if (!user.hasExamGoal) return '/my-exams?onboarding=1';
+          if (!user.hasExamGoal) return '/add-exam?onboarding=1';
           return '/home';
         }
         // Advance forward when setup step completes
         if (user.hasSelectedExam && user.hasExamGoal &&
             (loc == '/exam-goal' ||
                 (isSelectExam && !isChangeExamFlow) ||
-                isOnboardingMyExams)) {
+                isOnboardingMyExams ||
+                isOnboardingWizard)) {
           return '/home';
         }
         if (!user.hasSelectedExam && loc == '/exam-goal') {
-          return '/my-exams?onboarding=1';
+          return '/add-exam?onboarding=1';
         }
         if (!user.hasExamGoal && isSelectExam && !isChangeExamFlow) {
-          return '/my-exams?onboarding=1';
+          return '/add-exam?onboarding=1';
         }
         // Block dashboard if setup incomplete
-        if (!user.hasSelectedExam && !isOnboardingMyExams) {
-          return '/my-exams?onboarding=1';
+        if (!user.hasSelectedExam && !isOnboardingMyExams && !isOnboardingWizard) {
+          return '/add-exam?onboarding=1';
         }
         if (user.hasSelectedExam && !user.hasExamGoal &&
             loc != '/exam-goal' &&
-            !isOnboardingMyExams) {
-          return '/my-exams?onboarding=1';
+            !isOnboardingMyExams &&
+            !isOnboardingWizard) {
+          return '/add-exam?onboarding=1';
         }
       }
 
@@ -126,6 +132,12 @@ class AppRouter {
         path: '/exam-goal',
         builder: (_, state) => ExamGoalSetupScreen(
           exam: state.extra as ExamModel?,
+        ),
+      ),
+      GoRoute(
+        path: '/add-exam',
+        builder: (_, state) => AddExamWizardScreen(
+          isOnboarding: state.uri.queryParameters['onboarding'] == '1',
         ),
       ),
       GoRoute(
@@ -170,7 +182,10 @@ class AppRouter {
               ),
             ],
           ),
-          GoRoute(path: '/study', builder: (_, __) => const DashboardScreen()),
+          GoRoute(
+            path: '/study',
+            redirect: (_, __) => '/home',
+          ),
           GoRoute(path: '/analytics', builder: (_, __) => const AnalyticsScreen()),
           GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
           GoRoute(

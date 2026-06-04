@@ -488,7 +488,11 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
             const SizedBox(height: 28),
             GradientButton(
               label: 'Add Your First Exam',
-              onPressed: _addExam,
+              onPressed: () => context.push(
+                widget.isOnboarding
+                    ? '/add-exam?onboarding=1'
+                    : '/add-exam',
+              ),
             ),
           ],
         ),
@@ -548,7 +552,9 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('My Exams')),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addExam,
+        onPressed: () => context.push(
+          widget.isOnboarding ? '/add-exam?onboarding=1' : '/add-exam',
+        ),
         label: const Text('Add Exam'),
         icon: const Icon(Icons.add),
       ),
@@ -641,11 +647,21 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
       bottomNavigationBar: widget.isOnboarding
           ? SafeArea(
               minimum: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: ElevatedButton(
-                onPressed: _myExams.isEmpty ? null : _continueOnboarding,
-                child: Text(_myExams.isEmpty
-                    ? 'Add at least one exam to continue'
-                    : 'Continue to Goal Setup'),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _myExams.isEmpty
+                      ? () => context.push('/add-exam?onboarding=1')
+                      : _continueOnboarding,
+                  child: Text(
+                    _myExams.isEmpty
+                        ? 'Add at least one exam to continue'
+                        : 'Continue to Goal Setup',
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ),
             )
           : null,
