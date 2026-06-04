@@ -20,7 +20,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   void initState() {
     super.initState();
     AnalyticsService.logScreenView(screenName: 'AnalyticsScreen');
-    context.read<DashboardBloc>().add(DashboardLoadRequested());
+    final dashState = context.read<DashboardBloc>().state;
+    if (dashState is! DashboardLoaded) {
+      context.read<DashboardBloc>().add(DashboardLoadRequested());
+    }
   }
 
   @override

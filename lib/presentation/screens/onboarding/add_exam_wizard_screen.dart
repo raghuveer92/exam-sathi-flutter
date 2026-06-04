@@ -67,7 +67,16 @@ class _AddExamWizardScreenState extends State<AddExamWizardScreen> {
       _error = null;
     });
     try {
-      final catalog = await _catalogRepo.getCatalog();
+      final cached = await _catalogRepo.getCatalogCached();
+      if (cached != null && mounted) {
+        setState(() {
+          _categories = cached.categories;
+          _featured = cached.featuredExams;
+          _recommended = cached.recommendedExams;
+          _loading = false;
+        });
+      }
+      final catalog = await _catalogRepo.getCatalog(forceRemote: cached == null);
       if (!mounted) return;
       setState(() {
         _categories = catalog.categories;

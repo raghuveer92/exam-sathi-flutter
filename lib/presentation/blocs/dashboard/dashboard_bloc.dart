@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 
+import '../../../core/sync/offline_queue_service.dart';
+import '../../../core/sync/sync_service.dart';
 import '../../../data/models/dashboard_model.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 
@@ -11,11 +13,18 @@ part 'dashboard_state.dart';
 
 class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
   final DashboardRepository _repository;
+  final SyncService _syncService;
+  final OfflineQueueService _offlineQueue;
   Timer? _debounce;
   Timer? _resetTimer;
 
-  DashboardBloc({required DashboardRepository repository})
-      : _repository = repository,
+  DashboardBloc({
+    required DashboardRepository repository,
+    required SyncService syncService,
+    required OfflineQueueService offlineQueue,
+  })  : _repository = repository,
+        _syncService = syncService,
+        _offlineQueue = offlineQueue,
         super(DashboardInitial()) {
     on<DashboardLoadRequested>(_onLoadRequested);
     on<DashboardRefreshRequested>(_onRefreshRequested);
@@ -63,12 +72,24 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
     DashboardLoadRequested event,
     Emitter<DashboardState> emit,
   ) async {
-    emit(DashboardLoading());
+    final cached = await _repository.getDashboardCached();
+    if (cached == null) {
+      emit(DashboardLoading());
+    } else {
+      emit(DashboardLoaded(dashboard: cached));
+    }
     try {
-      final dashboard = await _repository.getDashboard();
-      emit(DashboardLoaded(dashboard: dashboard));
+      await _syncService.syncBundle(incremental: cached != null);
+      final dashboard = await _repository.getDashboardCached();
+      if (dashboard != null) {
+        emit(DashboardLoaded(dashboard: dashboard));
+      } else if (cached == null) {
+        emit(const DashboardError(message: 'No dashboard data available'));
+      }
     } catch (e) {
-      emit(DashboardError(message: e.toString()));
+      if (cached == null) {
+        emit(DashboardError(message: e.toString()));
+      }
     }
   }
 
@@ -77,10 +98,15 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
     Emitter<DashboardState> emit,
   ) async {
     try {
-      final dashboard = await _repository.getDashboard();
-      emit(DashboardLoaded(dashboard: dashboard));
+      await _syncService.syncBundle(incremental: true, force: true);
+      final dashboard = await _repository.getDashboardCached();
+      if (dashboard != null) {
+        emit(DashboardLoaded(dashboard: dashboard));
+      }
     } catch (e) {
-      emit(DashboardError(message: e.toString()));
+      if (state is! DashboardLoaded) {
+        emit(DashboardError(message: e.toString()));
+      }
     }
   }
 
@@ -116,7 +142,14 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
 
     emit(current.copyWith(saveStatus: SaveStatus.saving));
     try {
-      await _repository.updateStudyHours(event.hours);
+      if (await _syncService.isOnline()) {
+        await _repository.updateStudyHours(event.hours);
+      } else {
+        await _offlineQueue.enqueue(
+          type: 'STUDY_HOURS',
+          payload: {'dailyTargetHours': event.hours},
+        );
+      }
 
       // Confirm optimistic value and show ✓ Saved
       emit(current.copyWith(

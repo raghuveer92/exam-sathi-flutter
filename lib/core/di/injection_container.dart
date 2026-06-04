@@ -7,7 +7,11 @@ import '../../data/repositories/dashboard_repository.dart';
 import '../../data/repositories/exam_catalog_repository.dart';
 import '../../data/repositories/mock_test_repository.dart';
 import '../../data/repositories/progress_repository.dart';
+import '../../data/repositories/sync_repository.dart';
+import '../local/local_store.dart';
 import '../network/api_client.dart';
+import '../sync/offline_queue_service.dart';
+import '../sync/sync_service.dart';
 import '../../presentation/blocs/auth/auth_bloc.dart';
 import '../../presentation/blocs/dashboard/dashboard_bloc.dart';
 
@@ -15,10 +19,12 @@ import '../../presentation/blocs/dashboard/dashboard_bloc.dart';
 Future<void> setupDependencies() async {
   final sl = GetIt.I;
 
-  // Reset on hot restart to avoid "already registered" errors in development.
   await sl.reset();
 
-  // ── Core ──────────────────────────────────────────────────────────────────
+  final localStore = LocalStore();
+  await localStore.init();
+  sl.registerSingleton<LocalStore>(localStore);
+
   sl.registerLazySingleton<Logger>(() => Logger());
   sl.registerLazySingleton<FlutterSecureStorage>(
       () => const FlutterSecureStorage());
@@ -26,7 +32,6 @@ Future<void> setupDependencies() async {
   sl.registerLazySingleton<ApiClient>(() => ApiClient(
         storage: sl<FlutterSecureStorage>(),
         logger: sl<Logger>(),
-        // On 401/403, auto-logout: lazily resolved so no circular dependency
         onUnauthorized: () {
           try {
             sl<AuthBloc>().add(AuthLogoutRequested());
@@ -34,22 +39,45 @@ Future<void> setupDependencies() async {
         },
       ));
 
+  sl.registerLazySingleton<SyncRepository>(
+      () => SyncRepository(client: sl<ApiClient>()));
+  sl.registerLazySingleton<OfflineQueueService>(() => OfflineQueueService(
+        store: sl<LocalStore>(),
+        syncRepository: sl<SyncRepository>(),
+      ));
+  sl.registerLazySingleton<SyncService>(() => SyncService(
+        store: sl<LocalStore>(),
+        syncRepository: sl<SyncRepository>(),
+        offlineQueue: sl<OfflineQueueService>(),
+        logger: sl<Logger>(),
+      )..startConnectivityListener());
 
-  // ── Repositories ──────────────────────────────────────────────────────────
   sl.registerLazySingleton<AuthRepository>(
       () => AuthRepository(client: sl<ApiClient>()));
-  sl.registerLazySingleton<DashboardRepository>(
-      () => DashboardRepository(client: sl<ApiClient>()));
-  sl.registerLazySingleton<ExamCatalogRepository>(
-      () => ExamCatalogRepository(client: sl<ApiClient>()));
-  sl.registerLazySingleton<ProgressRepository>(
-      () => ProgressRepository(client: sl<ApiClient>()));
-  sl.registerLazySingleton<MockTestRepository>(
-      () => MockTestRepository(client: sl<ApiClient>()));
+  sl.registerLazySingleton<DashboardRepository>(() => DashboardRepository(
+        client: sl<ApiClient>(),
+        store: sl<LocalStore>(),
+      ));
+  sl.registerLazySingleton<ExamCatalogRepository>(() => ExamCatalogRepository(
+        client: sl<ApiClient>(),
+        store: sl<LocalStore>(),
+      ));
+  sl.registerLazySingleton<ProgressRepository>(() => ProgressRepository(
+        client: sl<ApiClient>(),
+        store: sl<LocalStore>(),
+        offlineQueue: sl<OfflineQueueService>(),
+        syncService: sl<SyncService>(),
+      ));
+  sl.registerLazySingleton<MockTestRepository>(() => MockTestRepository(
+        client: sl<ApiClient>(),
+        store: sl<LocalStore>(),
+      ));
 
-  // ── BLoCs ─────────────────────────────────────────────────────────────────
   sl.registerLazySingleton<AuthBloc>(
       () => AuthBloc(authRepository: sl<AuthRepository>()));
-  sl.registerFactory<DashboardBloc>(
-      () => DashboardBloc(repository: sl<DashboardRepository>()));
+  sl.registerFactory<DashboardBloc>(() => DashboardBloc(
+        repository: sl<DashboardRepository>(),
+        syncService: sl<SyncService>(),
+        offlineQueue: sl<OfflineQueueService>(),
+      ));
 }

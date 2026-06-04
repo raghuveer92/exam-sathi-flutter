@@ -11,6 +11,7 @@ import '../../../core/firebase/analytics_service.dart';
 import '../../../data/models/dashboard_model.dart';
 import '../../../data/models/subject_progress_model.dart';
 import '../../../data/models/user_exam_model.dart';
+import '../../../core/sync/sync_service.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
 import '../../widgets/dashboard/overall_progress_card.dart';
@@ -70,6 +71,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     final completer = Completer<void>();
     _refreshCompleter = completer;
+    try {
+      await GetIt.I<SyncService>().refreshAll();
+    } catch (_) {}
     context.read<DashboardBloc>().add(DashboardRefreshRequested());
     return completer.future.timeout(
       const Duration(seconds: 15),
@@ -125,7 +129,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final grouped = <int, List<SubjectProgressModel>>{};
       for (final exam in exams) {
         try {
-          final subjects = await repo.getSubjectProgressByExam(exam.examId);
+          final cached = repo.getSubjectProgressCached(exam.examId);
+          final subjects = cached ??
+              await repo.getSubjectProgressByExam(exam.examId);
           subjects.sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
           grouped[exam.examId] = subjects;
         } catch (_) {

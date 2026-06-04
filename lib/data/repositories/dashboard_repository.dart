@@ -5,11 +5,12 @@ import '../models/subject_model.dart';
 import '../models/subject_progress_model.dart';
 import '../models/user_exam_model.dart';
 import '../models/user_model.dart';
+import '../../core/local/api_call_tracker.dart';
+import '../../core/local/local_store.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
 
 /// Formats a DateTime to YYYY-MM-DD using local year/month/day fields.
-/// Avoids toIso8601String() which can return UTC on Flutter web.
 String _fmtLocalDate(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-'
     '${d.month.toString().padLeft(2, '0')}-'
@@ -17,26 +18,118 @@ String _fmtLocalDate(DateTime d) =>
 
 class DashboardRepository {
   final ApiClient _client;
+  final LocalStore _store;
 
-  DashboardRepository({required ApiClient client}) : _client = client;
+  DashboardRepository({
+    required ApiClient client,
+    required LocalStore store,
+  })  : _client = client,
+        _store = store;
 
-  Future<DashboardModel> getDashboard() async {
-    final response = await _client.dio.get(ApiEndpoints.dashboard);
-    final data = response.data['data'] as Map<String, dynamic>;
+  // ── Cache-first reads ─────────────────────────────────────────────────────
+
+  Future<DashboardModel?> getDashboardCached() async {
+    final data = _store.getJson(LocalStore.dashboardKey);
+    if (data == null) return null;
     return DashboardModel.fromJson(data);
   }
 
-  Future<List<UserExamModel>> getMyExams() async {
+  Future<List<UserExamModel>> getMyExamsCached() async {
+    final list = _store.getJsonList(LocalStore.myExamsKey);
+    if (list == null) return [];
+    return list
+        .map((e) => UserExamModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  List<SubjectProgressModel>? getSubjectProgressCached(int examId) {
+    final list = _store.getJsonList(_store.subjectProgressKey(examId));
+    if (list == null) return null;
+    return list
+        .map((e) => SubjectProgressModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  List<SubjectModel>? getVisibleSubjectsCached(int examId) {
+    final list = _store.getJsonList(_store.visibleSubjectsKey(examId));
+    if (list == null) return null;
+    return list
+        .map((e) => SubjectModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<DashboardModel> getDashboard({bool forceRemote = false}) async {
+    if (!forceRemote) {
+      final cached = await getDashboardCached();
+      if (cached != null) return cached;
+    }
+    ApiCallTracker.instance.record('GET ${ApiEndpoints.dashboard}');
+    final response = await _client.dio.get(ApiEndpoints.dashboard);
+    final data = response.data['data'] as Map<String, dynamic>;
+    await _store.putJson(LocalStore.dashboardKey, data);
+    return DashboardModel.fromJson(data);
+  }
+
+  Future<List<UserExamModel>> getMyExams({bool forceRemote = false}) async {
+    if (!forceRemote) {
+      final cached = await getMyExamsCached();
+      if (cached.isNotEmpty) return cached;
+    }
+    ApiCallTracker.instance.record('GET ${ApiEndpoints.myExams}');
     final response = await _client.dio.get(ApiEndpoints.myExams);
     final list = response.data['data'] as List<dynamic>;
+    await _store.putJson(LocalStore.myExamsKey, list);
     return list.map((e) => UserExamModel.fromJson(e as Map<String, dynamic>)).toList();
   }
+
+  Future<List<SubjectProgressModel>> getSubjectProgressByExam(
+    int examId, {
+    bool forceRemote = false,
+  }) async {
+    if (!forceRemote) {
+      final cached = getSubjectProgressCached(examId);
+      if (cached != null && cached.isNotEmpty) return cached;
+    }
+    ApiCallTracker.instance.record('GET ${ApiEndpoints.subjectProgress(examId)}');
+    final response = await _client.dio.get(ApiEndpoints.subjectProgress(examId));
+    final list = response.data['data'] as List<dynamic>;
+    await _store.putJson(_store.subjectProgressKey(examId), list);
+    return list
+        .map((e) => SubjectProgressModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<List<SubjectModel>> getVisibleSubjectsByExam(
+    int examId, {
+    bool forceRemote = false,
+  }) async {
+    if (!forceRemote) {
+      final cached = getVisibleSubjectsCached(examId);
+      if (cached != null && cached.isNotEmpty) return cached;
+    }
+    final groups = await getExamSubjectGroups(examId);
+    final subjects = groups
+        .expand(
+          (group) => group.isOptional
+              ? group.subjects.where((subject) => subject.selected)
+              : group.subjects,
+        )
+        .toList();
+    await _store.putJson(
+      _store.visibleSubjectsKey(examId),
+      subjects.map((s) => s.toJson()).toList(),
+    );
+    return subjects;
+  }
+
+  // ── Mutations (always remote; queue handled by callers when offline) ─────
 
   Future<UserModel> addMyExam({
     required int examId,
     DateTime? examDate,
     List<Map<String, dynamic>> subjectSelections = const [],
   }) async {
+    ApiCallTracker.instance.record('POST ${ApiEndpoints.myExams}');
     final response = await _client.dio.post(
       ApiEndpoints.myExams,
       data: {
@@ -49,6 +142,7 @@ class DashboardRepository {
   }
 
   Future<List<ExamSubjectGroupModel>> getExamSubjectGroups(int examId) async {
+    ApiCallTracker.instance.record('GET ${ApiEndpoints.examSubjectGroups(examId)}');
     final response = await _client.dio.get(ApiEndpoints.examSubjectGroups(examId));
     final list = response.data['data'] as List<dynamic>;
     return list
@@ -76,6 +170,7 @@ class DashboardRepository {
   }
 
   Future<UserModel> setActiveMyExam(int userExamId) async {
+    ApiCallTracker.instance.record('PATCH active exam');
     final response = await _client.dio.patch(ApiEndpoints.setActiveMyExam(userExamId));
     return UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
   }
@@ -86,6 +181,7 @@ class DashboardRepository {
   }
 
   Future<List<ExamModel>> getExams() async {
+    ApiCallTracker.instance.record('GET ${ApiEndpoints.exams}');
     final response = await _client.dio.get(ApiEndpoints.exams);
     final list = response.data['data'] as List<dynamic>;
     return list.map((e) => ExamModel.fromJson(e as Map<String, dynamic>)).toList();
@@ -111,6 +207,7 @@ class DashboardRepository {
   }
 
   Future<void> updateStudyHours(double dailyTargetHours) async {
+    ApiCallTracker.instance.record('PATCH ${ApiEndpoints.studyHours}');
     await _client.dio.patch(
       ApiEndpoints.studyHours,
       data: {'dailyTargetHours': dailyTargetHours},
@@ -121,24 +218,5 @@ class DashboardRepository {
     final response = await _client.dio.get(ApiEndpoints.subjectsByExam(examId));
     final list = response.data['data'] as List<dynamic>;
     return list.map((e) => SubjectModel.fromJson(e as Map<String, dynamic>)).toList();
-  }
-
-  Future<List<SubjectModel>> getVisibleSubjectsByExam(int examId) async {
-    final groups = await getExamSubjectGroups(examId);
-    return groups
-        .expand(
-          (group) => group.isOptional
-              ? group.subjects.where((subject) => subject.selected)
-              : group.subjects,
-        )
-        .toList();
-  }
-
-  Future<List<SubjectProgressModel>> getSubjectProgressByExam(int examId) async {
-    final response = await _client.dio.get(ApiEndpoints.subjectProgress(examId));
-    final list = response.data['data'] as List<dynamic>;
-    return list
-        .map((e) => SubjectProgressModel.fromJson(e as Map<String, dynamic>))
-        .toList();
   }
 }

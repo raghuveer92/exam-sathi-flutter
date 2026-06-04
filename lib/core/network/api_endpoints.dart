@@ -58,4 +58,9 @@ class ApiEndpoints {
   static String mockTestSubmit(int attemptId) => '/mock-tests/attempts/$attemptId/submit';
   static String mockTestAttempt(int attemptId) => '/mock-tests/attempts/$attemptId';
   static const String mockTestPerformance = '/mock-tests/performance';
+
+  // Sync (offline-first)
+  static const String syncCatalog = '/sync/catalog';
+  static const String syncBundle = '/sync/bundle';
+  static const String syncPush = '/sync/push';
 }

@@ -24,7 +24,12 @@ class _MockTestPerformanceSectionState extends State<MockTestPerformanceSection>
 
   Future<void> _load() async {
     try {
-      final perf = await GetIt.I<MockTestRepository>().getPerformance();
+      final repo = GetIt.I<MockTestRepository>();
+      final cached = await repo.getPerformanceCached();
+      if (cached != null && mounted) {
+        setState(() => _performance = cached);
+      }
+      final perf = await repo.getPerformance(forceRemote: cached == null);
       if (mounted) setState(() => _performance = perf);
     } finally {
       if (mounted) setState(() => _loading = false);

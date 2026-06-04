@@ -7,7 +7,9 @@ import '../../../core/firebase/analytics_service.dart';
 import '../../../data/models/subject_model.dart';
 import '../../../data/models/subject_progress_model.dart';
 import '../../../data/models/user_exam_model.dart';
+import '../../../core/sync/sync_service.dart';
 import '../../../data/repositories/dashboard_repository.dart';
+import '../../widgets/sync_refresh_button.dart';
 
 class SubjectsScreen extends StatefulWidget {
   const SubjectsScreen({super.key});
@@ -51,24 +53,31 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
     _loadAll();
   }
 
-  Future<void> _loadAll() async {
+  Future<void> _loadAll({bool forceRemote = false}) async {
     setState(() {
-      _loading = true;
+      _loading = _groups.isEmpty;
       _error = null;
     });
     try {
-      final exams = await _repo.getMyExams();
+      final exams = forceRemote
+          ? await _repo.getMyExams(forceRemote: true)
+          : await _repo.getMyExams();
       final groups = <_ExamSubjectsGroup>[];
 
       for (final exam in exams) {
-        final results = await Future.wait([
-          _repo.getVisibleSubjectsByExam(exam.examId),
-          _repo.getSubjectProgressByExam(exam.examId),
-        ]);
-
-        final subjects = results[0] as List<SubjectModel>;
+        final cachedSubjects = _repo.getVisibleSubjectsCached(exam.examId);
+        final cachedProgress = _repo.getSubjectProgressCached(exam.examId);
+        final subjects = cachedSubjects ??
+            await _repo.getVisibleSubjectsByExam(
+              exam.examId,
+              forceRemote: forceRemote,
+            );
         subjects.sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
-        final progressRows = results[1] as List<SubjectProgressModel>;
+        final progressRows = cachedProgress ??
+            await _repo.getSubjectProgressByExam(
+              exam.examId,
+              forceRemote: forceRemote,
+            );
         final progressBySubject = <int, SubjectProgressModel>{
           for (final row in progressRows) row.subjectId: row,
         };
@@ -115,7 +124,17 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF7F8FC),
-      appBar: AppBar(title: const Text('Subjects')),
+      appBar: AppBar(
+        title: const Text('Subjects'),
+        actions: [
+          SyncRefreshButton(
+            onRefreshed: () async {
+              await GetIt.I<SyncService>().refreshAll();
+              await _loadAll(forceRemote: true);
+            },
+          ),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null

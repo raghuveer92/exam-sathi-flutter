@@ -26,6 +26,10 @@ dependencies:
   # Local Storage
   shared_preferences: ^2.3.0
   flutter_secure_storage: ^9.2.2
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  connectivity_plus: ^6.0.5
+  uuid: ^4.5.1
 
   # UI Packages
   fl_chart: ^0.68.0

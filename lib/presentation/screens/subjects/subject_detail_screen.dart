@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -14,7 +13,7 @@ import '../../../data/models/mock_test_model.dart';
 import '../../../data/models/topic_model.dart';
 import '../../../data/repositories/mock_test_repository.dart';
 import '../../../data/repositories/progress_repository.dart';
-import '../../blocs/dashboard/dashboard_bloc.dart';
+import '../../../core/sync/sync_service.dart';
 
 // ─── Topic status helper ────────────────────────────────────────────────────
 enum _TopicStatus { notStarted, inProgress, completed }
@@ -118,11 +117,23 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     _load();
   }
 
-  Future<void> _load({bool silent = false}) async {
+  Future<void> _load({bool silent = false, bool forceRemote = false}) async {
     if (!silent) setState(() => _loading = _detail == null);
     try {
-      final detail =
-          await GetIt.I<ProgressRepository>().getSubjectDetail(widget.subjectId);
+      final repo = GetIt.I<ProgressRepository>();
+      if (!forceRemote && _detail == null) {
+        final cached = await repo.getSubjectDetailCached(widget.subjectId);
+        if (cached != null && mounted) {
+          setState(() {
+            _detail = cached;
+            _loading = false;
+          });
+        }
+      }
+      final detail = await repo.getSubjectDetail(
+        widget.subjectId,
+        forceRemote: forceRemote,
+      );
       if (!mounted) return;
       setState(() {
         _detail = detail;
@@ -167,7 +178,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
       if (!mounted) return;
       setState(() => _savingTopicId = null);
       if (mounted) {
-        context.read<DashboardBloc>().add(DashboardRefreshRequested());
+        unawaited(GetIt.I<SyncService>().syncBundle(incremental: true));
       }
       AnalyticsService.logTopicCompleted(
         topicId: topic.id,
@@ -205,7 +216,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
       }
       _load(silent: true);
       if (mounted) {
-        context.read<DashboardBloc>().add(DashboardRefreshRequested());
+        unawaited(GetIt.I<SyncService>().syncBundle(incremental: true));
       }
       AnalyticsService.logStudyHoursAdded(
         hours: hours,
@@ -641,7 +652,10 @@ class _TopicTileState extends State<_TopicTile> {
 
   Future<void> _loadMockTestInfo() async {
     try {
-      final info = await GetIt.I<MockTestRepository>().getTopicInfo(widget.topic.id);
+      final info = await GetIt.I<MockTestRepository>().getTopicInfo(
+        widget.topic.id,
+        forceRemote: false,
+      );
       if (mounted) {
         setState(() {
           _mockTestInfo = info.isConfigured && info.isActive ? info : null;

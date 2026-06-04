@@ -1,19 +1,37 @@
 import '../models/exam_catalog_model.dart';
 import '../models/exam_model.dart';
 import '../models/user_model.dart';
+import '../../core/local/api_call_tracker.dart';
+import '../../core/local/local_store.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
 
 class ExamCatalogRepository {
   final ApiClient _client;
+  final LocalStore _store;
 
-  ExamCatalogRepository({required ApiClient client}) : _client = client;
+  ExamCatalogRepository({
+    required ApiClient client,
+    required LocalStore store,
+  })  : _client = client,
+        _store = store;
 
-  Future<ExamCatalogModel> getCatalog() async {
+  Future<ExamCatalogModel?> getCatalogCached() async {
+    final data = _store.getJson(LocalStore.catalogKey);
+    if (data == null) return null;
+    return ExamCatalogModel.fromJson(data);
+  }
+
+  Future<ExamCatalogModel> getCatalog({bool forceRemote = false}) async {
+    if (!forceRemote) {
+      final cached = await getCatalogCached();
+      if (cached != null) return cached;
+    }
+    ApiCallTracker.instance.record('GET ${ApiEndpoints.examCatalog}');
     final response = await _client.dio.get(ApiEndpoints.examCatalog);
-    return ExamCatalogModel.fromJson(
-      response.data['data'] as Map<String, dynamic>,
-    );
+    final data = response.data['data'] as Map<String, dynamic>;
+    await _store.putJson(LocalStore.catalogKey, data);
+    return ExamCatalogModel.fromJson(data);
   }
 
   Future<List<ExamModel>> getExamsByCategory(int categoryId) async {

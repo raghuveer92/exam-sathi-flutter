@@ -55,6 +55,24 @@ class SubjectModel extends Equatable {
         selected: (json['selected'] as bool?) ?? false,
       );
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'examId': examId,
+        'name': name,
+        'description': description,
+        'iconName': iconName,
+        'colorCode': colorCode,
+        'displayOrder': displayOrder,
+        'isActive': isActive,
+        'topicCount': topicCount,
+        'groupId': groupId,
+        'groupName': groupName,
+        'groupOptional': groupOptional,
+        'groupMinSelection': groupMinSelection,
+        'groupMaxSelection': groupMaxSelection,
+        'selected': selected,
+      };
+
   /// Parse hex color code to Flutter Color.
   Color get color {
     try {

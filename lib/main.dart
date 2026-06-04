@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,8 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/di/injection_container.dart';
+import 'core/local/local_store.dart';
+import 'core/sync/sync_service.dart';
 import 'core/firebase/analytics_service.dart';
 import 'core/firebase/firebase_initializer.dart';
 import 'core/router/app_router.dart';
@@ -74,9 +77,14 @@ class _ExamSaathiAppState extends State<ExamSaathiApp> {
       ],
       child: BlocListener<AuthBloc, AuthState>(
         listener: (context, state) {
-          // Reset dashboard data on logout so next login fetches fresh data
+          if (state is AuthAuthenticated) {
+            final sync = GetIt.I<SyncService>();
+            unawaited(sync.syncBundle(incremental: false));
+            unawaited(sync.syncCatalog(incremental: false));
+          }
           if (state is AuthUnauthenticated) {
             context.read<DashboardBloc>().add(DashboardResetRequested());
+            unawaited(GetIt.I<LocalStore>().clearAll());
             AnalyticsService.logLogout();
           }
         },
