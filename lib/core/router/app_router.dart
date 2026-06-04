@@ -58,14 +58,19 @@ class AppRouter {
       final authState = context.read<AuthBloc>().state;
       final loc = state.matchedLocation;
       final isSplash = loc == '/splash';
+      final isLogin = loc == '/login';
+      final isRegister = loc == '/register';
+      final isAuthForm = isLogin || isRegister;
       final isSelectExam = loc == '/select-exam';
       final isMyExams = loc == '/my-exams';
       final isOnboardingMyExams =
           isMyExams && state.uri.queryParameters['onboarding'] == '1';
       final isChangeExamFlow = isSelectExam && state.uri.queryParameters['change'] == '1';
 
-      if (authState is AuthLoading && !isSplash) return '/splash';
+      if (authState is AuthLoading && !isSplash && !isAuthForm) return '/splash';
       if (authState is AuthInitial && !isSplash) return '/splash';
+
+      if (authState is AuthError && isSplash) return isRegister ? '/register' : '/login';
 
       if (authState is AuthAuthenticated) {
         final user = authState.user;

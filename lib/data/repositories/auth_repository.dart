@@ -13,7 +13,8 @@ class AuthRepository {
       ApiEndpoints.login,
       data: {'email': email, 'password': password},
     );
-    final data = response.data['data'];
+    final body = response.data as Map<String, dynamic>;
+    final data = body['data'] as Map<String, dynamic>;
     await _client.saveToken(data['accessToken'] as String);
     return data;
   }
@@ -33,7 +34,8 @@ class AuthRepository {
         if (phone != null) 'phone': phone,
       },
     );
-    final data = response.data['data'];
+    final body = response.data as Map<String, dynamic>;
+    final data = body['data'] as Map<String, dynamic>;
     await _client.saveToken(data['accessToken'] as String);
     return data;
   }

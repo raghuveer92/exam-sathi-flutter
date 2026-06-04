@@ -48,7 +48,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       appBar: AppBar(leading: const BackButton()),
       body: BlocConsumer<AuthBloc, AuthState>(
         listener: (context, state) {
-          if (state is AuthAuthenticated) context.go('/my-exams?onboarding=1');
           if (state is AuthError) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(

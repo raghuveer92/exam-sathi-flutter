@@ -446,6 +446,56 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
     await _syncUserInState();
   }
 
+  Widget _buildEmptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 96,
+              height: 96,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.menu_book_rounded,
+                size: 44,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'No exams yet',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              widget.isOnboarding
+                  ? 'Add your first exam to start tracking your syllabus and progress.'
+                  : 'Add an exam to track your syllabus, subjects, and study progress.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textSecondary,
+                    height: 1.5,
+                  ),
+            ),
+            const SizedBox(height: 28),
+            GradientButton(
+              label: 'Add Your First Exam',
+              onPressed: _addExam,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _delete(UserExamModel ue) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -506,10 +556,20 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: _load,
-              child: ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-                itemCount: _myExams.length,
-                itemBuilder: (_, i) {
+              child: _myExams.isEmpty
+                  ? LayoutBuilder(
+                      builder: (context, constraints) => SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                          child: _buildEmptyState(),
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                      itemCount: _myExams.length,
+                      itemBuilder: (_, i) {
                   final e = _myExams[i];
                   final p = (e.progressPercent ?? 0).clamp(0, 100) / 100.0;
                   return Card(
