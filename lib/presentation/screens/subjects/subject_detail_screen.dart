@@ -73,6 +73,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
   String? _error;
   int? _savingTopicId;
   _TopicFilter _topicFilter = _TopicFilter.all;
+  Timer? _dashboardSyncDebounce;
   // Local hours overrides for optimistic header updates before backend save
   final Map<int, double> _localHoursMap = {};
 
@@ -115,6 +116,41 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _dashboardSyncDebounce?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleDashboardSync() {
+    _dashboardSyncDebounce?.cancel();
+    _dashboardSyncDebounce = Timer(const Duration(seconds: 8), () {
+      if (mounted) {
+        unawaited(GetIt.I<SyncService>().syncBundle(incremental: true));
+      }
+    });
+  }
+
+  Future<void> _applyLocalTopicUpdate({
+    required TopicModel topic,
+    required double hours,
+    required bool isCompleted,
+  }) async {
+    final repo = GetIt.I<ProgressRepository>();
+    final updated = await repo.patchTopicInCache(
+      subjectId: widget.subjectId,
+      topicId: topic.id,
+      actualHours: hours,
+      isCompleted: isCompleted,
+      status: isCompleted ? 'COMPLETED' : (hours > 0 ? 'IN_PROGRESS' : topic.status),
+    );
+    if (!mounted || updated == null) return;
+    setState(() {
+      _detail = updated;
+      _localHoursMap[topic.id] = hours;
+    });
   }
 
   Future<void> _load({bool silent = false, bool forceRemote = false}) async {
@@ -173,75 +209,59 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
   }
 
   Future<void> _onTopicComplete(TopicModel topic, double hours) async {
-    setState(() => _savingTopicId = topic.id);
-    try {
-      await GetIt.I<ProgressRepository>().markTopicComplete(
-        topicId: topic.id,
-        isCompleted: true,
-        actualHours: hours,
-      );
-      // Log study hours so dashboard todayHours is updated
-      if (hours > 0) {
-        try {
-          final prevHours = topic.actualHours;
-          final delta = hours - prevHours;
-          if (delta > 0) {
-            await GetIt.I<ProgressRepository>().logStudyHours(
-              studyDate: _localTodayDate(),
-              hoursStudied: delta,
-            );
-          }
-        } catch (_) {} // non-critical
-      }
-      await _load(silent: true);
-      if (!mounted) return;
-      setState(() => _savingTopicId = null);
-      if (mounted) {
-        unawaited(GetIt.I<SyncService>().syncBundle(incremental: true));
-      }
-      AnalyticsService.logTopicCompleted(
-        topicId: topic.id,
-        topicName: topic.title,
-        subjectName: _detail?.subjectName ?? '',
-        actualHours: hours,
-      );
-      _showSuccessDialog(topic.title, hours);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _savingTopicId = null);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.error),
-      );
-    }
+    final prevHours = topic.actualHours;
+    final delta = hours - prevHours;
+
+    await _applyLocalTopicUpdate(
+      topic: topic,
+      hours: hours,
+      isCompleted: true,
+    );
+    if (!mounted) return;
+
+    _showSuccessDialog(topic.title, hours);
+
+    GetIt.I<ProgressRepository>().persistTopicProgressInBackground(
+      topicId: topic.id,
+      isCompleted: true,
+      actualHours: hours,
+      studyHoursDelta: delta > 0 ? delta : null,
+      studyDate: _localTodayDate(),
+    );
+    _scheduleDashboardSync();
+
+    AnalyticsService.logTopicCompleted(
+      topicId: topic.id,
+      topicName: topic.title,
+      subjectName: _detail?.subjectName ?? '',
+      actualHours: hours,
+    );
   }
 
   Future<void> _onHoursUpdated(TopicModel topic, double hours) async {
     if (hours == topic.actualHours) return;
     final delta = hours - topic.actualHours;
-    try {
-      await GetIt.I<ProgressRepository>().markTopicComplete(
-        topicId: topic.id,
-        isCompleted: false,
-        actualHours: hours,
-      );
-      // Log positive delta so dashboard todayHours is updated
-      if (delta > 0) {
-        try {
-          await GetIt.I<ProgressRepository>().logStudyHours(
-            studyDate: _localTodayDate(),
-            hoursStudied: delta,
-          );
-        } catch (_) {} // non-critical
-      }
-      _load(silent: true);
-      if (mounted) {
-        unawaited(GetIt.I<SyncService>().syncBundle(incremental: true));
-      }
-      AnalyticsService.logStudyHoursAdded(
-        hours: hours,
-        subjectName: _detail?.subjectName ?? '',
-      );
-    } catch (_) {}
+
+    await _applyLocalTopicUpdate(
+      topic: topic,
+      hours: hours,
+      isCompleted: topic.isCompleted,
+    );
+    if (!mounted) return;
+
+    GetIt.I<ProgressRepository>().persistTopicProgressInBackground(
+      topicId: topic.id,
+      isCompleted: topic.isCompleted,
+      actualHours: hours,
+      studyHoursDelta: delta > 0 ? delta : null,
+      studyDate: _localTodayDate(),
+    );
+    _scheduleDashboardSync();
+
+    AnalyticsService.logStudyHoursAdded(
+      hours: hours,
+      subjectName: _detail?.subjectName ?? '',
+    );
   }
 
   void _showSuccessDialog(String title, double hours) {
@@ -742,7 +762,9 @@ class _TopicTileState extends State<_TopicTile> {
       if (_localHours < 0.5) _localHours = 0.5;
     });
     widget.onLocalHoursChanged(widget.topic.id, _localHours);
-    widget.onHoursUpdated(widget.topic, _localHours);
+    if (_localHours != widget.topic.actualHours) {
+      _scheduleHoursSave();
+    }
   }
 
   void _showConfirm() {
