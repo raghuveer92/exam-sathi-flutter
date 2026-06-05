@@ -1,6 +1,8 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
 
+import 'subject_model.dart';
+
 class SubjectProgressModel extends Equatable {
   final int subjectId;
   final String subjectName;
@@ -37,6 +39,17 @@ class SubjectProgressModel extends Equatable {
             ((json['completionPercent'] as num?) ?? 0.0).toDouble(),
         totalEstimatedHours:
             ((json['totalEstimatedHours'] as num?) ?? 0.0).toDouble(),
+      );
+
+  /// Build a [SubjectModel] for subjects list when only progress cache exists.
+  SubjectModel toSubjectModel(int examId) => SubjectModel(
+        id: subjectId,
+        examId: examId,
+        name: subjectName,
+        iconName: iconName,
+        colorCode: colorCode,
+        displayOrder: displayOrder,
+        topicCount: totalTopics,
       );
 
   Color get color {

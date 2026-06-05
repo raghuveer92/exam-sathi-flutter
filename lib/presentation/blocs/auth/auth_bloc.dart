@@ -26,15 +26,32 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     Emitter<AuthState> emit,
   ) async {
     emit(AuthLoading());
+
+    final hasToken = await _authRepository.isLoggedIn();
+    if (!hasToken) {
+      emit(AuthUnauthenticated());
+      return;
+    }
+
+    // Offline-first: restore cached profile immediately — no network required.
+    final cached = await _authRepository.restoreSession();
+    if (cached != null) {
+      emit(AuthAuthenticated(user: cached, isOfflineSession: true));
+    }
+
+    // Background refresh when online (best-effort).
     try {
-      final isLoggedIn = await _authRepository.isLoggedIn();
-      if (isLoggedIn) {
-        final user = await _authRepository.getMe();
-        emit(AuthAuthenticated(user: user));
-      } else {
-        emit(AuthUnauthenticated());
+      final user = await _authRepository.getMe();
+      emit(AuthAuthenticated(user: user, isOfflineSession: false));
+    } catch (e) {
+      if (cached != null) return;
+      if (e is DioException &&
+          (e.type == DioExceptionType.connectionError ||
+              e.type == DioExceptionType.connectionTimeout ||
+              e.type == DioExceptionType.receiveTimeout)) {
+        emit(const AuthError(message: 'No internet. Please connect and try again.'));
+        return;
       }
-    } catch (_) {
       emit(AuthUnauthenticated());
     }
   }

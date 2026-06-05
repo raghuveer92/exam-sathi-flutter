@@ -121,24 +121,29 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     if (!silent) setState(() => _loading = _detail == null);
     try {
       final repo = GetIt.I<ProgressRepository>();
-      if (!forceRemote && _detail == null) {
+      if (!forceRemote) {
         final cached = await repo.getSubjectDetailCached(widget.subjectId);
-        if (cached != null && mounted) {
+        if (cached != null) {
+          if (!mounted) return;
           setState(() {
             _detail = cached;
             _loading = false;
+            _error = null;
           });
+          unawaited(_refreshSubjectDetailInBackground());
+          return;
         }
       }
       final detail = await repo.getSubjectDetail(
         widget.subjectId,
-        forceRemote: forceRemote,
+        forceRemote: true,
       );
       if (!mounted) return;
       setState(() {
         _detail = detail;
         _loading = false;
-        _localHoursMap.clear(); // fresh backend data — drop local overrides
+        _localHoursMap.clear();
+        _error = null;
       });
       AnalyticsService.logSubjectOpened(
         subjectId: detail.subjectId,
@@ -147,10 +152,24 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = _detail == null ? e.toString() : null;
         _loading = false;
       });
     }
+  }
+
+  Future<void> _refreshSubjectDetailInBackground() async {
+    try {
+      final detail = await GetIt.I<ProgressRepository>().getSubjectDetail(
+        widget.subjectId,
+        forceRemote: true,
+      );
+      if (!mounted) return;
+      setState(() {
+        _detail = detail;
+        _localHoursMap.clear();
+      });
+    } catch (_) {}
   }
 
   Future<void> _onTopicComplete(TopicModel topic, double hours) async {

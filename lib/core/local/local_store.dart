@@ -13,6 +13,8 @@ class LocalStore {
   static const String syncBundleAtKey = 'sync_bundle_at';
   static const String offlineQueueKey = 'offline_queue';
   static const String mockPerformanceKey = 'mock_performance';
+  static const String userProfileKey = 'user_profile';
+  static const String syncStatusKey = 'sync_status';
 
   Box<String>? _box;
 
@@ -45,6 +47,10 @@ class LocalStore {
 
   Future<void> putString(String key, String value) async {
     await _box?.put(key, value);
+  }
+
+  Future<void> deleteKey(String key) async {
+    await _box?.delete(key);
   }
 
   String subjectProgressKey(int examId) => 'subject_progress_$examId';

@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/constants/app_colors.dart';
 import '../../../core/firebase/analytics_service.dart';
+import '../../../core/sync/sync_service.dart';
 import '../../../data/models/subject_model.dart';
 import '../../../data/models/subject_progress_model.dart';
 import '../../../data/models/user_exam_model.dart';
-import '../../../core/sync/sync_service.dart';
 import '../../../data/repositories/dashboard_repository.dart';
+import '../../widgets/offline_mode_banner.dart';
 import '../../widgets/sync_refresh_button.dart';
 
 class SubjectsScreen extends StatefulWidget {
@@ -30,6 +30,25 @@ class _ExamSubjectsGroup {
     required this.progress,
     required this.progressBySubject,
   });
+
+  factory _ExamSubjectsGroup.fromCache(ExamSubjectsCacheGroup group) {
+    final progressBySubject = <int, SubjectProgressModel>{
+      for (final row in group.progressRows) row.subjectId: row,
+    };
+    final totalTopics =
+        group.progressRows.fold<int>(0, (acc, e) => acc + e.totalTopics);
+    final completedTopics =
+        group.progressRows.fold<int>(0, (acc, e) => acc + e.completedTopics);
+    final progress =
+        totalTopics == 0 ? 0.0 : (completedTopics * 100.0 / totalTopics);
+
+    return _ExamSubjectsGroup(
+      exam: group.exam,
+      subjects: group.subjects,
+      progress: progress,
+      progressBySubject: progressBySubject,
+    );
+  }
 }
 
 class _SubjectsScreenState extends State<SubjectsScreen> {
@@ -37,6 +56,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
   List<_ExamSubjectsGroup> _groups = const [];
   final Set<int> _expandedExamIds = <int>{};
   bool _loading = true;
+  bool _backgroundSyncing = false;
   String? _error;
 
   static const List<Color> _examAccents = <Color>[
@@ -50,69 +70,49 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
   void initState() {
     super.initState();
     AnalyticsService.logScreenView(screenName: 'SubjectsScreen');
-    _loadAll();
+    _loadFromLocal();
+    _syncInBackground();
   }
 
-  Future<void> _loadAll({bool forceRemote = false}) async {
+  void _loadFromLocal() {
+    _repo.buildSubjectGroupsFromCache().then((cached) {
+      if (!mounted) return;
+      final groups = cached.map(_ExamSubjectsGroup.fromCache).toList();
+      setState(() {
+        _groups = groups;
+        _loading = false;
+        _error = null;
+        if (_expandedExamIds.isEmpty && groups.isNotEmpty) {
+          _expandedExamIds.addAll(groups.map((e) => e.exam.id));
+        }
+      });
+    });
+  }
+
+  Future<void> _syncInBackground() async {
+    setState(() => _backgroundSyncing = true);
+    try {
+      await GetIt.I<SyncService>().fullInitialSync(incremental: true);
+      _loadFromLocal();
+    } catch (_) {
+      // Keep showing cached data.
+    } finally {
+      if (mounted) setState(() => _backgroundSyncing = false);
+    }
+  }
+
+  Future<void> _manualRefresh() async {
     setState(() {
-      _loading = _groups.isEmpty;
+      _backgroundSyncing = true;
       _error = null;
     });
     try {
-      final exams = forceRemote
-          ? await _repo.getMyExams(forceRemote: true)
-          : await _repo.getMyExams();
-      final groups = <_ExamSubjectsGroup>[];
-
-      for (final exam in exams) {
-        final cachedSubjects = _repo.getVisibleSubjectsCached(exam.examId);
-        final cachedProgress = _repo.getSubjectProgressCached(exam.examId);
-        final subjects = cachedSubjects ??
-            await _repo.getVisibleSubjectsByExam(
-              exam.examId,
-              forceRemote: forceRemote,
-            );
-        subjects.sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
-        final progressRows = cachedProgress ??
-            await _repo.getSubjectProgressByExam(
-              exam.examId,
-              forceRemote: forceRemote,
-            );
-        final progressBySubject = <int, SubjectProgressModel>{
-          for (final row in progressRows) row.subjectId: row,
-        };
-        final totalTopics = progressRows.fold<int>(0, (acc, e) => acc + e.totalTopics);
-        final completedTopics = progressRows.fold<int>(0, (acc, e) => acc + e.completedTopics);
-        final progress = totalTopics == 0 ? 0.0 : (completedTopics * 100.0 / totalTopics);
-
-        groups.add(_ExamSubjectsGroup(
-          exam: exam,
-          subjects: subjects,
-          progress: progress,
-          progressBySubject: progressBySubject,
-        ));
-      }
-
-      groups.sort((a, b) {
-        final ad = a.exam.daysLeft ?? 1 << 20;
-        final bd = b.exam.daysLeft ?? 1 << 20;
-        return ad.compareTo(bd);
-      });
-
-      if (!mounted) return;
-      setState(() {
-        _groups = groups;
-        _expandedExamIds
-          ..clear()
-          ..addAll(groups.map((e) => e.exam.id));
-        _loading = false;
-      });
+      await GetIt.I<SyncService>().refreshAll();
+      _loadFromLocal();
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.toString();
-      });
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _backgroundSyncing = false);
     }
   }
 
@@ -127,32 +127,52 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
       appBar: AppBar(
         title: const Text('Subjects'),
         actions: [
-          SyncRefreshButton(
-            onRefreshed: () async {
-              await GetIt.I<SyncService>().refreshAll();
-              await _loadAll(forceRemote: true);
-            },
+          if (_backgroundSyncing)
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
+          SyncRefreshButton(onRefreshed: _manualRefresh),
+        ],
+      ),
+      body: Column(
+        children: [
+          const OfflineModeBanner(),
+          Expanded(
+            child: _loading && _groups.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : _groups.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            _error ??
+                                'No subjects in cache yet. Connect to internet and tap sync.',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      )
+                    : RefreshIndicator(
+                        onRefresh: _manualRefresh,
+                        child: ListView(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+                          children: [
+                            for (var i = 0; i < _groups.length; i++) ...[
+                              _buildExamSection(_groups[i], i),
+                              const SizedBox(height: 14),
+                            ],
+                          ],
+                        ),
+                      ),
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(child: Text(_error!))
-              : _groups.isEmpty
-                  ? const Center(child: Text('No exams found. Add exams from My Exams.'))
-                  : RefreshIndicator(
-                      onRefresh: _loadAll,
-                      child: ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-                        children: [
-                          for (var i = 0; i < _groups.length; i++) ...[
-                            _buildExamSection(_groups[i], i),
-                            const SizedBox(height: 14),
-                          ],
-                        ],
-                      ),
-                    ),
     );
   }
 
@@ -167,7 +187,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
         border: Border.all(color: const Color(0xFFE5E7F2)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -194,7 +214,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: accent.withOpacity(0.14),
+                      color: accent.withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(Icons.description_outlined, color: accent),
@@ -222,7 +242,6 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
                     isExpanded
                         ? Icons.keyboard_arrow_up_rounded
                         : Icons.keyboard_arrow_down_rounded,
-                    color: AppColors.textPrimary,
                   ),
                 ],
               ),
@@ -267,7 +286,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
               width: 30,
               height: 30,
               decoration: BoxDecoration(
-                color: accent.withOpacity(0.12),
+                color: accent.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(Icons.menu_book_outlined, size: 17, color: accent),
@@ -279,27 +298,17 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary,
                 ),
               ),
             ),
             Text(
               '${completion.toStringAsFixed(0)}%',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                color: accent,
-              ),
+              style: TextStyle(fontWeight: FontWeight.w700, color: accent),
             ),
             const SizedBox(width: 10),
-            Text(
-              '$completedTopics/$totalTopics topics',
-              style: const TextStyle(
-                color: AppColors.textSecondary,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+            Text('$completedTopics/$totalTopics topics'),
             const SizedBox(width: 6),
-            const Icon(Icons.chevron_right_rounded, color: AppColors.textHint),
+            const Icon(Icons.chevron_right_rounded),
           ],
         ),
       ),

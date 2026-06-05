@@ -32,6 +32,17 @@ class UserExamModel extends Equatable {
         isActive: (json['isActive'] as bool?) ?? false,
       );
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'examId': examId,
+        'examName': examName,
+        'examDate': examDate,
+        'daysLeft': daysLeft,
+        'totalSubjects': totalSubjects,
+        'progressPercent': progressPercent,
+        'isActive': isActive,
+      };
+
   @override
   List<Object?> get props => [id, examId, examName, examDate, isActive, progressPercent];
 }

@@ -12,9 +12,13 @@ class AuthLoading extends AuthState {}
 
 class AuthAuthenticated extends AuthState {
   final UserModel user;
-  const AuthAuthenticated({required this.user});
+  final bool isOfflineSession;
+  const AuthAuthenticated({
+    required this.user,
+    this.isOfflineSession = false,
+  });
   @override
-  List<Object?> get props => [user];
+  List<Object?> get props => [user, isOfflineSession];
 }
 
 class AuthUnauthenticated extends AuthState {}

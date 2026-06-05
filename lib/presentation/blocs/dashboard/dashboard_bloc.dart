@@ -79,7 +79,7 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
       emit(DashboardLoaded(dashboard: cached));
     }
     try {
-      await _syncService.syncBundle(incremental: cached != null);
+      await _syncService.fullInitialSync(incremental: cached != null);
       final dashboard = await _repository.getDashboardCached();
       if (dashboard != null) {
         emit(DashboardLoaded(dashboard: dashboard));
@@ -98,7 +98,7 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
     Emitter<DashboardState> emit,
   ) async {
     try {
-      await _syncService.syncBundle(incremental: true, force: true);
+      await _syncService.fullInitialSync(incremental: true);
       final dashboard = await _repository.getDashboardCached();
       if (dashboard != null) {
         emit(DashboardLoaded(dashboard: dashboard));

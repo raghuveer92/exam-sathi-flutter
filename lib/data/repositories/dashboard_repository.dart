@@ -16,6 +16,19 @@ String _fmtLocalDate(DateTime d) =>
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
 
+/// Local-only grouping for subjects screen.
+class ExamSubjectsCacheGroup {
+  final UserExamModel exam;
+  final List<SubjectModel> subjects;
+  final List<SubjectProgressModel> progressRows;
+
+  const ExamSubjectsCacheGroup({
+    required this.exam,
+    required this.subjects,
+    required this.progressRows,
+  });
+}
+
 class DashboardRepository {
   final ApiClient _client;
   final LocalStore _store;
@@ -58,68 +71,131 @@ class DashboardRepository {
         .toList();
   }
 
-  Future<DashboardModel> getDashboard({bool forceRemote = false}) async {
-    if (!forceRemote) {
-      final cached = await getDashboardCached();
-      if (cached != null) return cached;
+  /// My exams from dedicated key or embedded dashboard cache.
+  Future<List<UserExamModel>> resolveMyExamsFromCache() async {
+    final fromKey = await getMyExamsCached();
+    if (fromKey.isNotEmpty) return fromKey;
+    final dashboard = await getDashboardCached();
+    if (dashboard != null && dashboard.myExams.isNotEmpty) {
+      return dashboard.myExams;
     }
-    ApiCallTracker.instance.record('GET ${ApiEndpoints.dashboard}');
-    final response = await _client.dio.get(ApiEndpoints.dashboard);
-    final data = response.data['data'] as Map<String, dynamic>;
-    await _store.putJson(LocalStore.dashboardKey, data);
-    return DashboardModel.fromJson(data);
+    return const [];
+  }
+
+  /// Visible subjects from cache, or derived from subject progress rows.
+  List<SubjectModel> resolveVisibleSubjects(int examId) {
+    final visible = getVisibleSubjectsCached(examId);
+    if (visible != null && visible.isNotEmpty) return visible;
+
+    final progress = getSubjectProgressCached(examId);
+    if (progress != null && progress.isNotEmpty) {
+      final derived = progress.map((p) => p.toSubjectModel(examId)).toList();
+      derived.sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
+      return derived;
+    }
+    return const [];
+  }
+
+  /// Build subject groups purely from local cache (never hits network).
+  Future<List<ExamSubjectsCacheGroup>> buildSubjectGroupsFromCache() async {
+    final exams = await resolveMyExamsFromCache();
+    final groups = <ExamSubjectsCacheGroup>[];
+
+    for (final exam in exams) {
+      final subjects = resolveVisibleSubjects(exam.examId);
+      final progressRows =
+          getSubjectProgressCached(exam.examId) ?? const <SubjectProgressModel>[];
+      if (subjects.isEmpty && progressRows.isEmpty) continue;
+
+      groups.add(ExamSubjectsCacheGroup(
+        exam: exam,
+        subjects: subjects,
+        progressRows: progressRows,
+      ));
+    }
+
+    groups.sort((a, b) {
+      final ad = a.exam.daysLeft ?? 1 << 20;
+      final bd = b.exam.daysLeft ?? 1 << 20;
+      return ad.compareTo(bd);
+    });
+    return groups;
+  }
+
+  Future<DashboardModel> getDashboard({bool forceRemote = false}) async {
+    final cached = await getDashboardCached();
+    if (!forceRemote) {
+      if (cached != null) return cached;
+      throw StateError('No cached dashboard');
+    }
+    try {
+      ApiCallTracker.instance.record('GET ${ApiEndpoints.dashboard}');
+      final response = await _client.dio.get(ApiEndpoints.dashboard);
+      final data = response.data['data'] as Map<String, dynamic>;
+      await _store.putJson(LocalStore.dashboardKey, data);
+      return DashboardModel.fromJson(data);
+    } catch (_) {
+      if (cached != null) return cached;
+      rethrow;
+    }
   }
 
   Future<List<UserExamModel>> getMyExams({bool forceRemote = false}) async {
-    if (!forceRemote) {
-      final cached = await getMyExamsCached();
-      if (cached.isNotEmpty) return cached;
+    final cached = await resolveMyExamsFromCache();
+    if (!forceRemote) return cached;
+    try {
+      ApiCallTracker.instance.record('GET ${ApiEndpoints.myExams}');
+      final response = await _client.dio.get(ApiEndpoints.myExams);
+      final list = response.data['data'] as List<dynamic>;
+      await _store.putJson(LocalStore.myExamsKey, list);
+      return list.map((e) => UserExamModel.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return cached;
     }
-    ApiCallTracker.instance.record('GET ${ApiEndpoints.myExams}');
-    final response = await _client.dio.get(ApiEndpoints.myExams);
-    final list = response.data['data'] as List<dynamic>;
-    await _store.putJson(LocalStore.myExamsKey, list);
-    return list.map((e) => UserExamModel.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<List<SubjectProgressModel>> getSubjectProgressByExam(
     int examId, {
     bool forceRemote = false,
   }) async {
-    if (!forceRemote) {
-      final cached = getSubjectProgressCached(examId);
-      if (cached != null && cached.isNotEmpty) return cached;
+    final cached = getSubjectProgressCached(examId) ?? const <SubjectProgressModel>[];
+    if (!forceRemote) return cached;
+    try {
+      ApiCallTracker.instance.record('GET ${ApiEndpoints.subjectProgress(examId)}');
+      final response = await _client.dio.get(ApiEndpoints.subjectProgress(examId));
+      final list = response.data['data'] as List<dynamic>;
+      await _store.putJson(_store.subjectProgressKey(examId), list);
+      return list
+          .map((e) => SubjectProgressModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return cached;
     }
-    ApiCallTracker.instance.record('GET ${ApiEndpoints.subjectProgress(examId)}');
-    final response = await _client.dio.get(ApiEndpoints.subjectProgress(examId));
-    final list = response.data['data'] as List<dynamic>;
-    await _store.putJson(_store.subjectProgressKey(examId), list);
-    return list
-        .map((e) => SubjectProgressModel.fromJson(e as Map<String, dynamic>))
-        .toList();
   }
 
   Future<List<SubjectModel>> getVisibleSubjectsByExam(
     int examId, {
     bool forceRemote = false,
   }) async {
-    if (!forceRemote) {
-      final cached = getVisibleSubjectsCached(examId);
-      if (cached != null && cached.isNotEmpty) return cached;
+    final cached = resolveVisibleSubjects(examId);
+    if (!forceRemote) return cached;
+    try {
+      final groups = await getExamSubjectGroups(examId);
+      final subjects = groups
+          .expand(
+            (group) => group.isOptional
+                ? group.subjects.where((subject) => subject.selected)
+                : group.subjects,
+          )
+          .toList();
+      await _store.putJson(
+        _store.visibleSubjectsKey(examId),
+        subjects.map((s) => s.toJson()).toList(),
+      );
+      return subjects;
+    } catch (_) {
+      return cached;
     }
-    final groups = await getExamSubjectGroups(examId);
-    final subjects = groups
-        .expand(
-          (group) => group.isOptional
-              ? group.subjects.where((subject) => subject.selected)
-              : group.subjects,
-        )
-        .toList();
-    await _store.putJson(
-      _store.visibleSubjectsKey(examId),
-      subjects.map((s) => s.toJson()).toList(),
-    );
-    return subjects;
   }
 
   // ── Mutations (always remote; queue handled by callers when offline) ─────

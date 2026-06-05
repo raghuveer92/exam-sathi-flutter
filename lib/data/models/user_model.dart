@@ -66,6 +66,26 @@ class UserModel extends Equatable {
             [],
       );
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'email': email,
+        'fullName': fullName,
+        'phone': phone,
+        'avatarUrl': avatarUrl,
+        'selectedExamId': selectedExamId,
+        'selectedExamName': selectedExamName,
+        'examDate': examDate,
+        'syllabusTargetDate': syllabusTargetDate,
+        'dailyTargetHours': dailyTargetHours,
+        'weeklyTargetHours': weeklyTargetHours,
+        'daysUntilExam': daysUntilExam,
+        'activeUserExamId': activeUserExamId,
+        'userExams': userExams.map((e) => e.toJson()).toList(),
+        'studyStreakDays': studyStreakDays,
+        'isActive': isActive,
+        'roles': roles,
+      };
+
   bool get isAdmin => roles.contains('ROLE_ADMIN');
   bool get hasSelectedExam => selectedExamId != null;
   bool get hasExamGoal => examDate != null;

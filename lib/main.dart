@@ -78,9 +78,7 @@ class _ExamSaathiAppState extends State<ExamSaathiApp> {
       child: BlocListener<AuthBloc, AuthState>(
         listener: (context, state) {
           if (state is AuthAuthenticated) {
-            final sync = GetIt.I<SyncService>();
-            unawaited(sync.syncBundle(incremental: false));
-            unawaited(sync.syncCatalog(incremental: false));
+            unawaited(GetIt.I<SyncService>().fullInitialSync(incremental: false));
           }
           if (state is AuthUnauthenticated) {
             context.read<DashboardBloc>().add(DashboardResetRequested());

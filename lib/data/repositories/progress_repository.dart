@@ -1,3 +1,5 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
+
 import '../models/subject_detail_model.dart';
 import '../models/topic_model.dart';
 import '../../core/local/api_call_tracker.dart';
@@ -5,23 +7,24 @@ import '../../core/local/local_store.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
 import '../../core/sync/offline_queue_service.dart';
-import '../../core/sync/sync_service.dart';
 
 class ProgressRepository {
   final ApiClient _client;
   final LocalStore _store;
   final OfflineQueueService _offlineQueue;
-  final SyncService _syncService;
 
   ProgressRepository({
     required ApiClient client,
     required LocalStore store,
     required OfflineQueueService offlineQueue,
-    required SyncService syncService,
   })  : _client = client,
         _store = store,
-        _offlineQueue = offlineQueue,
-        _syncService = syncService;
+        _offlineQueue = offlineQueue;
+
+  Future<bool> _isOnline() async {
+    final results = await Connectivity().checkConnectivity();
+    return results.any((r) => r != ConnectivityResult.none);
+  }
 
   Future<SubjectDetailModel?> getSubjectDetailCached(int subjectId) async {
     final data = _store.getJson(_store.subjectDetailKey(subjectId));
@@ -33,15 +36,21 @@ class ProgressRepository {
     int subjectId, {
     bool forceRemote = false,
   }) async {
+    final cached = await getSubjectDetailCached(subjectId);
     if (!forceRemote) {
-      final cached = await getSubjectDetailCached(subjectId);
       if (cached != null) return cached;
+      throw StateError('Subject $subjectId not available offline. Sync when online.');
     }
-    ApiCallTracker.instance.record('GET ${ApiEndpoints.subjectDetail(subjectId)}');
-    final response = await _client.dio.get(ApiEndpoints.subjectDetail(subjectId));
-    final data = response.data['data'] as Map<String, dynamic>;
-    await _store.putJson(_store.subjectDetailKey(subjectId), data);
-    return SubjectDetailModel.fromJson(data);
+    try {
+      ApiCallTracker.instance.record('GET ${ApiEndpoints.subjectDetail(subjectId)}');
+      final response = await _client.dio.get(ApiEndpoints.subjectDetail(subjectId));
+      final data = response.data['data'] as Map<String, dynamic>;
+      await _store.putJson(_store.subjectDetailKey(subjectId), data);
+      return SubjectDetailModel.fromJson(data);
+    } catch (_) {
+      if (cached != null) return cached;
+      rethrow;
+    }
   }
 
   Future<void> markTopicComplete({
@@ -54,7 +63,7 @@ class ProgressRepository {
       'isCompleted': isCompleted,
       'actualHours': actualHours,
     };
-    if (!await _syncService.isOnline()) {
+    if (!await _isOnline()) {
       await _offlineQueue.enqueue(type: 'TOPIC_PROGRESS', payload: payload);
       return;
     }
@@ -77,7 +86,7 @@ class ProgressRepository {
       'hoursStudied': hoursStudied,
       'topicsCompleted': topicsCompleted,
     };
-    if (!await _syncService.isOnline()) {
+    if (!await _isOnline()) {
       await _offlineQueue.enqueue(type: 'LOG_STUDY', payload: payload);
       return;
     }

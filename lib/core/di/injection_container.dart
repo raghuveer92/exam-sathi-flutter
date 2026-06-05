@@ -45,15 +45,11 @@ Future<void> setupDependencies() async {
         store: sl<LocalStore>(),
         syncRepository: sl<SyncRepository>(),
       ));
-  sl.registerLazySingleton<SyncService>(() => SyncService(
-        store: sl<LocalStore>(),
-        syncRepository: sl<SyncRepository>(),
-        offlineQueue: sl<OfflineQueueService>(),
-        logger: sl<Logger>(),
-      )..startConnectivityListener());
 
-  sl.registerLazySingleton<AuthRepository>(
-      () => AuthRepository(client: sl<ApiClient>()));
+  sl.registerLazySingleton<AuthRepository>(() => AuthRepository(
+        client: sl<ApiClient>(),
+        store: sl<LocalStore>(),
+      ));
   sl.registerLazySingleton<DashboardRepository>(() => DashboardRepository(
         client: sl<ApiClient>(),
         store: sl<LocalStore>(),
@@ -62,16 +58,25 @@ Future<void> setupDependencies() async {
         client: sl<ApiClient>(),
         store: sl<LocalStore>(),
       ));
-  sl.registerLazySingleton<ProgressRepository>(() => ProgressRepository(
-        client: sl<ApiClient>(),
-        store: sl<LocalStore>(),
-        offlineQueue: sl<OfflineQueueService>(),
-        syncService: sl<SyncService>(),
-      ));
   sl.registerLazySingleton<MockTestRepository>(() => MockTestRepository(
         client: sl<ApiClient>(),
         store: sl<LocalStore>(),
       ));
+  sl.registerLazySingleton<ProgressRepository>(() => ProgressRepository(
+        client: sl<ApiClient>(),
+        store: sl<LocalStore>(),
+        offlineQueue: sl<OfflineQueueService>(),
+      ));
+
+  sl.registerLazySingleton<SyncService>(() => SyncService(
+        store: sl<LocalStore>(),
+        syncRepository: sl<SyncRepository>(),
+        offlineQueue: sl<OfflineQueueService>(),
+        dashboardRepository: sl<DashboardRepository>(),
+        progressRepository: sl<ProgressRepository>(),
+        mockTestRepository: sl<MockTestRepository>(),
+        logger: sl<Logger>(),
+      )..startConnectivityListener());
 
   sl.registerLazySingleton<AuthBloc>(
       () => AuthBloc(authRepository: sl<AuthRepository>()));
