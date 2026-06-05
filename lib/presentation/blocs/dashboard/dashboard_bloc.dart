@@ -80,17 +80,22 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
     }
     try {
       await _syncService.fullInitialSync(incremental: cached != null);
-      final dashboard = await _repository.getDashboardCached();
-      if (dashboard != null) {
-        emit(DashboardLoaded(dashboard: dashboard));
-      } else if (cached == null) {
-        emit(const DashboardError(message: 'No dashboard data available'));
-      }
-    } catch (e) {
-      if (cached == null) {
-        emit(DashboardError(message: e.toString()));
+    } catch (_) {
+      // Sync errors are non-fatal when cache exists.
+    }
+
+    var dashboard = await _repository.getDashboardCached();
+    if (dashboard == null) {
+      try {
+        dashboard = await _repository.fetchDashboardFromNetwork();
+      } catch (e) {
+        if (cached == null) {
+          emit(DashboardError(message: e.toString()));
+        }
+        return;
       }
     }
+    emit(DashboardLoaded(dashboard: dashboard));
   }
 
   Future<void> _onRefreshRequested(
@@ -99,10 +104,9 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
   ) async {
     try {
       await _syncService.fullInitialSync(incremental: true);
-      final dashboard = await _repository.getDashboardCached();
-      if (dashboard != null) {
-        emit(DashboardLoaded(dashboard: dashboard));
-      }
+      final dashboard = await _repository.getDashboardCached() ??
+          await _repository.fetchDashboardFromNetwork();
+      emit(DashboardLoaded(dashboard: dashboard));
     } catch (e) {
       if (state is! DashboardLoaded) {
         emit(DashboardError(message: e.toString()));

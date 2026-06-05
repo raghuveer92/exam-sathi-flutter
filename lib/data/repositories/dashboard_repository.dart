@@ -126,16 +126,24 @@ class DashboardRepository {
     final cached = await getDashboardCached();
     if (!forceRemote) {
       if (cached != null) return cached;
-      throw StateError('No cached dashboard');
+      return fetchDashboardFromNetwork();
     }
+    return fetchDashboardFromNetwork(fallback: cached);
+  }
+
+  Future<DashboardModel> fetchDashboardFromNetwork({DashboardModel? fallback}) async {
     try {
       ApiCallTracker.instance.record('GET ${ApiEndpoints.dashboard}');
       final response = await _client.dio.get(ApiEndpoints.dashboard);
       final data = response.data['data'] as Map<String, dynamic>;
       await _store.putJson(LocalStore.dashboardKey, data);
+      final user = data['user'];
+      if (user != null) {
+        await _store.putJson(LocalStore.userProfileKey, user);
+      }
       return DashboardModel.fromJson(data);
     } catch (_) {
-      if (cached != null) return cached;
+      if (fallback != null) return fallback;
       rethrow;
     }
   }

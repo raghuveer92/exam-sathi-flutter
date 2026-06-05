@@ -74,7 +74,6 @@ Future<void> setupDependencies() async {
         offlineQueue: sl<OfflineQueueService>(),
         dashboardRepository: sl<DashboardRepository>(),
         progressRepository: sl<ProgressRepository>(),
-        mockTestRepository: sl<MockTestRepository>(),
         logger: sl<Logger>(),
       )..startConnectivityListener());
 
