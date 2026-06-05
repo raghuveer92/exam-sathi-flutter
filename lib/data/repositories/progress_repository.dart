@@ -1,11 +1,10 @@
-import 'package:connectivity_plus/connectivity_plus.dart';
-
 import '../models/subject_detail_model.dart';
 import '../models/topic_model.dart';
 import '../../core/local/api_call_tracker.dart';
 import '../../core/local/local_store.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
+import '../../core/network/connectivity_helper.dart';
 import '../../core/sync/offline_queue_service.dart';
 
 class ProgressRepository {
@@ -21,10 +20,7 @@ class ProgressRepository {
         _store = store,
         _offlineQueue = offlineQueue;
 
-  Future<bool> _isOnline() async {
-    final results = await Connectivity().checkConnectivity();
-    return results.any((r) => r != ConnectivityResult.none);
-  }
+  Future<bool> _isOnline() => isDeviceOnline();
 
   Future<SubjectDetailModel?> getSubjectDetailCached(int subjectId) async {
     final data = _store.getJson(_store.subjectDetailKey(subjectId));

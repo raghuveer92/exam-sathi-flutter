@@ -1,10 +1,9 @@
 import 'dart:async';
 
-import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter/foundation.dart';
 import 'package:logger/logger.dart';
 
 import '../local/local_store.dart';
+import '../network/connectivity_helper.dart';
 import '../../data/repositories/dashboard_repository.dart';
 import '../../data/repositories/progress_repository.dart';
 import '../../data/repositories/sync_repository.dart';
@@ -35,7 +34,7 @@ class SyncService {
   final ProgressRepository _progressRepository;
   final Logger _logger;
 
-  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  StreamSubscription? _connectivitySub;
   Completer<void>? _activeSync;
   SyncStatus _status = SyncStatus.idle;
   String? _lastError;
@@ -49,8 +48,7 @@ class SyncService {
 
   void startConnectivityListener() {
     _connectivitySub?.cancel();
-    _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
-      final online = results.any((r) => r != ConnectivityResult.none);
+    _connectivitySub = listenForConnectivity((online) {
       if (online) {
         unawaited(fullInitialSync(incremental: true));
       }
@@ -67,17 +65,7 @@ class SyncService {
     return raw != null ? DateTime.tryParse(raw) : null;
   }
 
-  Future<bool> isOnline() async {
-    // connectivity_plus often reports offline on Flutter web even when the browser
-    // has network — rely on actual API attempts instead.
-    if (kIsWeb) return true;
-    try {
-      final results = await Connectivity().checkConnectivity();
-      return results.any((r) => r != ConnectivityResult.none);
-    } catch (_) {
-      return true;
-    }
-  }
+  Future<bool> isOnline() => isDeviceOnline();
 
   void _setStatus(SyncStatus status) {
     _status = status;
