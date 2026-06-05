@@ -74,9 +74,17 @@ class AuthRepository {
 
   Future<bool> isLoggedIn() => _client.hasToken();
 
-  /// Offline-first session restore: token + cached profile is enough.
+  /// Offline-first session restore: token + cached profile (or dashboard user).
   Future<UserModel?> restoreSession() async {
     if (!await isLoggedIn()) return null;
-    return getCachedUser();
+    final cached = await getCachedUser();
+    if (cached != null) return cached;
+
+    final dashboard = _store.getJson(LocalStore.dashboardKey);
+    final user = dashboard?['user'];
+    if (user is Map<String, dynamic>) {
+      return UserModel.fromJson(user);
+    }
+    return null;
   }
 }

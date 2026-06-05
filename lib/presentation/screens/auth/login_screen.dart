@@ -61,7 +61,6 @@ class _LoginScreenState extends State<LoginScreen> {
           if (state is AuthAuthenticated) {
             AnalyticsService.logLogin();
             CrashlyticsService.setUser(userId: state.user.id.toString(), email: state.user.email);
-            context.go('/home');
           }
           if (state is AuthError) {
             ScaffoldMessenger.of(context).showSnackBar(

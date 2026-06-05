@@ -3,7 +3,6 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/firebase/analytics_service.dart';
-import '../../../core/sync/sync_service.dart';
 import '../../../data/models/subject_model.dart';
 import '../../../data/models/subject_progress_model.dart';
 import '../../../data/models/user_exam_model.dart';
@@ -55,7 +54,6 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
   List<_ExamSubjectsGroup> _groups = const [];
   final Set<int> _expandedExamIds = <int>{};
   bool _loading = true;
-  bool _backgroundSyncing = false;
   String? _error;
 
   static const List<Color> _examAccents = <Color>[
@@ -70,7 +68,6 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
     super.initState();
     AnalyticsService.logScreenView(screenName: 'SubjectsScreen');
     _loadFromLocal();
-    _syncInBackground();
   }
 
   void _loadFromLocal() {
@@ -80,45 +77,14 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
       setState(() {
         _groups = groups;
         _loading = false;
-        _error = null;
+        _error = groups.isEmpty
+            ? 'No subjects cached. Tap SYNC on Dashboard or Profile while online.'
+            : null;
         if (_expandedExamIds.isEmpty && groups.isNotEmpty) {
           _expandedExamIds.addAll(groups.map((e) => e.exam.id));
         }
       });
     });
-  }
-
-  Future<void> _syncInBackground() async {
-    setState(() => _backgroundSyncing = true);
-    try {
-      await GetIt.I<SyncService>().fullInitialSync(incremental: true);
-      _loadFromLocal();
-    } catch (_) {
-      // Keep showing cached data.
-    } finally {
-      if (mounted) setState(() => _backgroundSyncing = false);
-    }
-  }
-
-  Future<void> _manualRefresh() async {
-    setState(() {
-      _backgroundSyncing = true;
-      _error = null;
-    });
-    try {
-      await GetIt.I<SyncService>().refreshAll(force: true);
-      final exams = await _repo.getMyExams(forceRemote: true);
-      for (final exam in exams) {
-        await _repo.getSubjectProgressByExam(exam.examId, forceRemote: true);
-        await _repo.getVisibleSubjectsByExam(exam.examId, forceRemote: true);
-      }
-      _loadFromLocal();
-    } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
-      rethrow;
-    } finally {
-      if (mounted) setState(() => _backgroundSyncing = false);
-    }
   }
 
   SubjectProgressModel? _progressFor(_ExamSubjectsGroup group, SubjectModel subject) {
@@ -132,45 +98,33 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
       appBar: AppBar(
         title: const Text('Subjects'),
         actions: [
-          if (_backgroundSyncing)
-            const Padding(
-              padding: EdgeInsets.only(right: 8),
-              child: Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-            ),
-          SyncRefreshButton(onRefreshed: _manualRefresh),
+          SyncRefreshButton(onRefreshed: () async => _loadFromLocal()),
         ],
       ),
       body: _loading && _groups.isEmpty
-                ? const Center(child: CircularProgressIndicator())
-                : _groups.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Text(
-                            _error ??
-                                'No subjects in cache yet. Connect to internet and tap sync.',
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: _manualRefresh,
-                        child: ListView(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-                          children: [
-                            for (var i = 0; i < _groups.length; i++) ...[
-                              _buildExamSection(_groups[i], i),
-                              const SizedBox(height: 14),
-                            ],
-                          ],
-                        ),
-                      ),
+          ? const Center(child: CircularProgressIndicator())
+          : _groups.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      _error ?? 'No subjects in cache.',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: () async => _loadFromLocal(),
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+                    children: [
+                      for (var i = 0; i < _groups.length; i++) ...[
+                        _buildExamSection(_groups[i], i),
+                        const SizedBox(height: 14),
+                      ],
+                    ],
+                  ),
+                ),
     );
   }
 

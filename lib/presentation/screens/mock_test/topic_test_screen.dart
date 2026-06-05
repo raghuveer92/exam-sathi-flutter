@@ -87,6 +87,7 @@ class _TopicTestScreenState extends State<TopicTestScreen> {
           .toList();
       final result = await _repo.submitTest(
         _attempt!.id,
+        topicId: widget.topicId,
         timeSpentSeconds: _elapsed,
         answers: answers,
         timedOut: timedOut,

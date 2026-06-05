@@ -22,7 +22,10 @@ import '../../presentation/screens/mock_test/topic_test_screen.dart';
 import '../../data/models/mock_test_model.dart';
 import '../../data/models/exam_model.dart';
 import '../../presentation/screens/main/main_scaffold.dart';
+import '../../presentation/screens/offline/offline_setup_screen.dart';
 import '../../presentation/screens/splash/splash_screen.dart';
+import '../../core/local/local_store.dart';
+import 'package:get_it/get_it.dart';
 
 /// Bridges a Bloc stream into a [ChangeNotifier] so GoRouter can
 /// re-evaluate its redirect whenever auth state changes.
@@ -78,10 +81,17 @@ class AppRouter {
 
       if (authState is AuthAuthenticated) {
         final user = authState.user;
-        // From splash/login/register — guide to the right step
+        final downloadDone =
+            GetIt.I<LocalStore>().isInitialDownloadComplete();
+
         if (isSplash || loc == '/login' || loc == '/register') {
           if (!user.hasExamGoal) return '/add-exam?onboarding=1';
+          if (!downloadDone && loc != '/offline-setup') return '/offline-setup';
           return '/home';
+        }
+
+        if (!downloadDone && loc != '/offline-setup' && !isAddExamWizard) {
+          return '/offline-setup';
         }
         // Advance forward when setup step completes
         if (user.hasSelectedExam && user.hasExamGoal &&
@@ -122,6 +132,10 @@ class AppRouter {
       GoRoute(path: '/splash', builder: (_, __) => const SplashScreen()),
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
+      GoRoute(
+        path: '/offline-setup',
+        builder: (_, __) => const OfflineSetupScreen(),
+      ),
       GoRoute(
         path: '/select-exam',
         builder: (_, state) => ExamSelectionScreen(

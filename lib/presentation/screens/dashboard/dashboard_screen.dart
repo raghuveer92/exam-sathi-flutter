@@ -11,9 +11,9 @@ import '../../../core/firebase/analytics_service.dart';
 import '../../../data/models/dashboard_model.dart';
 import '../../../data/models/subject_progress_model.dart';
 import '../../../data/models/user_exam_model.dart';
-import '../../../core/sync/sync_service.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
+import '../../widgets/manual_sync_button.dart';
 import '../../widgets/dashboard/overall_progress_card.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -31,7 +31,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       <int, List<SubjectProgressModel>>{};
   bool _loadingSubjects = false;
   String _subjectsLoadKey = '';
-  Completer<void>? _refreshCompleter;
 
   void _setStateSafely(VoidCallback updater) {
     if (!mounted) return;
@@ -64,31 +63,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _refresh() async {
-    final existingRefresh = _refreshCompleter;
-    if (existingRefresh != null && !existingRefresh.isCompleted) {
-      return existingRefresh.future;
-    }
-
-    final completer = Completer<void>();
-    _refreshCompleter = completer;
-    try {
-      await GetIt.I<SyncService>().refreshAll();
-    } catch (_) {}
     context.read<DashboardBloc>().add(DashboardRefreshRequested());
-    return completer.future.timeout(
-      const Duration(seconds: 15),
-      onTimeout: () {
-        _finishRefresh();
-      },
-    );
-  }
-
-  void _finishRefresh() {
-    final completer = _refreshCompleter;
-    if (completer != null && !completer.isCompleted) {
-      completer.complete();
-    }
-    _refreshCompleter = null;
   }
 
   Future<void> _activateExam(UserExamModel exam) async {
@@ -128,15 +103,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final repo = GetIt.I<DashboardRepository>();
       final grouped = <int, List<SubjectProgressModel>>{};
       for (final exam in exams) {
-        try {
-          final cached = repo.getSubjectProgressCached(exam.examId);
-          final subjects = cached ??
-              await repo.getSubjectProgressByExam(exam.examId);
-          subjects.sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
-          grouped[exam.examId] = subjects;
-        } catch (_) {
-          grouped[exam.examId] = const [];
-        }
+        final cached = repo.getSubjectProgressCached(exam.examId);
+        final subjects = cached ?? const <SubjectProgressModel>[];
+        subjects.sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
+        grouped[exam.examId] = subjects;
       }
       if (!mounted) return;
       _setStateSafely(() {
@@ -154,11 +124,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: BlocConsumer<DashboardBloc, DashboardState>(
-        listener: (context, state) {
-          if (state is DashboardLoaded || state is DashboardError) {
-            _finishRefresh();
-          }
-        },
+        listener: (context, state) {},
         builder: (context, state) {
           if (state is DashboardInitial || state is DashboardLoading) {
             return const Center(child: CircularProgressIndicator());
@@ -324,6 +290,12 @@ class _HeaderSection extends StatelessWidget {
             ],
           ),
         ),
+        ManualSyncButton(
+          compact: true,
+          onComplete: () =>
+              context.read<DashboardBloc>().add(DashboardLoadRequested()),
+        ),
+        const SizedBox(width: 8),
         CircleAvatar(
           radius: 22,
           backgroundColor: const Color(0x116C63FF),

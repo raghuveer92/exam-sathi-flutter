@@ -23,6 +23,10 @@ Future<void> setupDependencies() async {
 
   final localStore = LocalStore();
   await localStore.init();
+  if (!localStore.isInitialDownloadComplete() &&
+      localStore.getJson(LocalStore.dashboardKey) != null) {
+    await localStore.markInitialDownloadComplete();
+  }
   sl.registerSingleton<LocalStore>(localStore);
 
   sl.registerLazySingleton<Logger>(() => Logger());
@@ -61,6 +65,7 @@ Future<void> setupDependencies() async {
   sl.registerLazySingleton<MockTestRepository>(() => MockTestRepository(
         client: sl<ApiClient>(),
         store: sl<LocalStore>(),
+        offlineQueue: sl<OfflineQueueService>(),
       ));
   sl.registerLazySingleton<ProgressRepository>(() => ProgressRepository(
         client: sl<ApiClient>(),
@@ -74,14 +79,14 @@ Future<void> setupDependencies() async {
         offlineQueue: sl<OfflineQueueService>(),
         dashboardRepository: sl<DashboardRepository>(),
         progressRepository: sl<ProgressRepository>(),
+        mockTestRepository: sl<MockTestRepository>(),
         logger: sl<Logger>(),
-      )..startConnectivityListener());
+      ));
 
   sl.registerLazySingleton<AuthBloc>(
       () => AuthBloc(authRepository: sl<AuthRepository>()));
   sl.registerFactory<DashboardBloc>(() => DashboardBloc(
         repository: sl<DashboardRepository>(),
-        syncService: sl<SyncService>(),
         offlineQueue: sl<OfflineQueueService>(),
       ));
 }

@@ -15,6 +15,7 @@ class LocalStore {
   static const String mockPerformanceKey = 'mock_performance';
   static const String userProfileKey = 'user_profile';
   static const String syncStatusKey = 'sync_status';
+  static const String initialDownloadCompleteKey = 'initial_download_complete';
 
   Box<String>? _box;
 
@@ -57,4 +58,17 @@ class LocalStore {
   String visibleSubjectsKey(int examId) => 'visible_subjects_$examId';
   String subjectDetailKey(int subjectId) => 'subject_detail_$subjectId';
   String topicMockInfoKey(int topicId) => 'topic_mock_info_$topicId';
+  String mockTestQuestionsKey(int topicId) => 'mock_test_questions_$topicId';
+  String mockTestLocalResultKey(String clientId) => 'mock_test_result_$clientId';
+
+  bool isInitialDownloadComplete() =>
+      getString(initialDownloadCompleteKey) == 'true';
+
+  Future<void> markInitialDownloadComplete() async {
+    await putString(initialDownloadCompleteKey, 'true');
+  }
+
+  Future<void> resetInitialDownloadComplete() async {
+    await deleteKey(initialDownloadCompleteKey);
+  }
 }

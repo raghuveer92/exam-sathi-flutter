@@ -13,7 +13,6 @@ import '../../../data/models/mock_test_model.dart';
 import '../../../data/models/topic_model.dart';
 import '../../../data/repositories/mock_test_repository.dart';
 import '../../../data/repositories/progress_repository.dart';
-import '../../../core/sync/sync_service.dart';
 
 // ─── Topic status helper ────────────────────────────────────────────────────
 enum _TopicStatus { notStarted, inProgress, completed }
@@ -73,8 +72,6 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
   String? _error;
   int? _savingTopicId;
   _TopicFilter _topicFilter = _TopicFilter.all;
-  Timer? _dashboardSyncDebounce;
-  // Local hours overrides for optimistic header updates before backend save
   final Map<int, double> _localHoursMap = {};
 
   List<TopicModel> get _allTopics {
@@ -118,21 +115,6 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     _load();
   }
 
-  @override
-  void dispose() {
-    _dashboardSyncDebounce?.cancel();
-    super.dispose();
-  }
-
-  void _scheduleDashboardSync() {
-    _dashboardSyncDebounce?.cancel();
-    _dashboardSyncDebounce = Timer(const Duration(seconds: 8), () {
-      if (mounted) {
-        unawaited(GetIt.I<SyncService>().syncBundle(incremental: true));
-      }
-    });
-  }
-
   Future<void> _applyLocalTopicUpdate({
     required TopicModel topic,
     required double hours,
@@ -153,26 +135,12 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     });
   }
 
-  Future<void> _load({bool silent = false, bool forceRemote = false}) async {
+  Future<void> _load({bool silent = false}) async {
     if (!silent) setState(() => _loading = _detail == null);
     try {
-      final repo = GetIt.I<ProgressRepository>();
-      if (!forceRemote) {
-        final cached = await repo.getSubjectDetailCached(widget.subjectId);
-        if (cached != null) {
-          if (!mounted) return;
-          setState(() {
-            _detail = cached;
-            _loading = false;
-            _error = null;
-          });
-          unawaited(_refreshSubjectDetailInBackground());
-          return;
-        }
-      }
-      final detail = await repo.getSubjectDetail(
+      final detail = await GetIt.I<ProgressRepository>().getSubjectDetail(
         widget.subjectId,
-        forceRemote: true,
+        forceRemote: false,
       );
       if (!mounted) return;
       setState(() {
@@ -194,20 +162,6 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     }
   }
 
-  Future<void> _refreshSubjectDetailInBackground() async {
-    try {
-      final detail = await GetIt.I<ProgressRepository>().getSubjectDetail(
-        widget.subjectId,
-        forceRemote: true,
-      );
-      if (!mounted) return;
-      setState(() {
-        _detail = detail;
-        _localHoursMap.clear();
-      });
-    } catch (_) {}
-  }
-
   Future<void> _onTopicComplete(TopicModel topic, double hours) async {
     final prevHours = topic.actualHours;
     final delta = hours - prevHours;
@@ -222,13 +176,13 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     _showSuccessDialog(topic.title, hours);
 
     GetIt.I<ProgressRepository>().persistTopicProgressInBackground(
+      subjectId: widget.subjectId,
       topicId: topic.id,
       isCompleted: true,
       actualHours: hours,
       studyHoursDelta: delta > 0 ? delta : null,
       studyDate: _localTodayDate(),
     );
-    _scheduleDashboardSync();
 
     AnalyticsService.logTopicCompleted(
       topicId: topic.id,
@@ -250,13 +204,13 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     if (!mounted) return;
 
     GetIt.I<ProgressRepository>().persistTopicProgressInBackground(
+      subjectId: widget.subjectId,
       topicId: topic.id,
       isCompleted: topic.isCompleted,
       actualHours: hours,
       studyHoursDelta: delta > 0 ? delta : null,
       studyDate: _localTodayDate(),
     );
-    _scheduleDashboardSync();
 
     AnalyticsService.logStudyHoursAdded(
       hours: hours,

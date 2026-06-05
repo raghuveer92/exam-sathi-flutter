@@ -45,11 +45,17 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       emit(AuthAuthenticated(user: user, isOfflineSession: false));
     } catch (e) {
       if (cached != null) return;
+      final fallback = await _authRepository.restoreSession();
+      if (fallback != null) {
+        emit(AuthAuthenticated(user: fallback, isOfflineSession: true));
+        return;
+      }
       if (e is DioException &&
           (e.type == DioExceptionType.connectionError ||
               e.type == DioExceptionType.connectionTimeout ||
               e.type == DioExceptionType.receiveTimeout)) {
-        emit(const AuthError(message: 'No internet. Please connect and try again.'));
+        emit(const AuthError(
+            message: 'No internet. Connect once to complete setup.'));
         return;
       }
       emit(AuthUnauthenticated());

@@ -6,6 +6,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/responsive_helper.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
+import '../../widgets/manual_sync_button.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -86,6 +87,12 @@ class ProfileScreen extends StatelessWidget {
                   ),
                   const Divider(height: 24),
                 ],
+                const Divider(height: 24),
+                ManualSyncButton(
+                  onComplete: () =>
+                      context.read<DashboardBloc>().add(DashboardLoadRequested()),
+                ),
+                const SizedBox(height: 16),
                 _ProfileTile(
                   icon: Icons.school_outlined,
                   label: 'My Exams',

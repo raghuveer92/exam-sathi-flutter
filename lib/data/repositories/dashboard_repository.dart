@@ -143,11 +143,12 @@ class DashboardRepository {
     return groups;
   }
 
+  /// Local-first read — never hits network during normal usage.
   Future<DashboardModel> getDashboard({bool forceRemote = false}) async {
     final cached = await getDashboardCached();
     if (!forceRemote) {
       if (cached != null) return cached;
-      return fetchDashboardFromNetwork();
+      throw StateError('Dashboard not available offline. Tap SYNC while online.');
     }
     return fetchDashboardFromNetwork(fallback: cached);
   }
@@ -318,6 +319,18 @@ class DashboardRepository {
       ApiEndpoints.studyHours,
       data: {'dailyTargetHours': dailyTargetHours},
     );
+  }
+
+  Future<void> updateStudyHoursLocal(double dailyTargetHours) async {
+    final data = _store.getJson(LocalStore.dashboardKey);
+    if (data == null) return;
+    final user = data['user'];
+    if (user is Map<String, dynamic>) {
+      user['dailyTargetHours'] = dailyTargetHours;
+      user['weeklyTargetHours'] = (dailyTargetHours * 7 * 10).round() / 10.0;
+    }
+    await _store.putJson(LocalStore.dashboardKey, data);
+    await _store.putJson(LocalStore.userProfileKey, user);
   }
 
   Future<List<SubjectModel>> getSubjectsByExam(int examId) async {

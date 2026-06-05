@@ -6,14 +6,10 @@ import '../../core/local/api_call_tracker.dart';
 import '../../core/local/local_store.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
-import '../../core/network/connectivity_helper.dart';
 import '../../core/sync/offline_queue_service.dart';
 
+/// All reads from local cache. All writes to cache + pending sync queue.
 class ProgressRepository {
-  final ApiClient _client;
-  final LocalStore _store;
-  final OfflineQueueService _offlineQueue;
-
   ProgressRepository({
     required ApiClient client,
     required LocalStore store,
@@ -22,7 +18,9 @@ class ProgressRepository {
         _store = store,
         _offlineQueue = offlineQueue;
 
-  Future<bool> _isOnline() => isDeviceOnline();
+  final ApiClient _client;
+  final LocalStore _store;
+  final OfflineQueueService _offlineQueue;
 
   Future<SubjectDetailModel?> getSubjectDetailCached(int subjectId) async {
     final data = _store.getJson(_store.subjectDetailKey(subjectId));
@@ -30,6 +28,7 @@ class ProgressRepository {
     return SubjectDetailModel.fromJson(data);
   }
 
+  /// Local-first read — never hits network during normal usage.
   Future<SubjectDetailModel> getSubjectDetail(
     int subjectId, {
     bool forceRemote = false,
@@ -37,7 +36,9 @@ class ProgressRepository {
     final cached = await getSubjectDetailCached(subjectId);
     if (!forceRemote) {
       if (cached != null) return cached;
-      throw StateError('Subject $subjectId not available offline. Sync when online.');
+      throw StateError(
+        'Subject $subjectId not available offline. Tap SYNC while online.',
+      );
     }
     try {
       ApiCallTracker.instance.record('GET ${ApiEndpoints.subjectDetail(subjectId)}');
@@ -51,27 +52,22 @@ class ProgressRepository {
     }
   }
 
+  /// Queue-only write — synced when user taps SYNC.
   Future<void> markTopicComplete({
     required int topicId,
     required bool isCompleted,
     double actualHours = 0.0,
   }) async {
-    final payload = {
-      'topicId': topicId,
-      'isCompleted': isCompleted,
-      'actualHours': actualHours,
-    };
-    if (!await _isOnline()) {
-      await _offlineQueue.enqueue(type: 'TOPIC_PROGRESS', payload: payload);
-      return;
-    }
-    try {
-      ApiCallTracker.instance.record('POST ${ApiEndpoints.updateProgress}');
-      await _client.dio.post(ApiEndpoints.updateProgress, data: payload);
-    } catch (_) {
-      await _offlineQueue.enqueue(type: 'TOPIC_PROGRESS', payload: payload);
-      rethrow;
-    }
+    await _offlineQueue.enqueue(
+      entityType: 'TOPIC',
+      entityId: topicId.toString(),
+      action: isCompleted ? 'COMPLETE_TOPIC' : 'ADD_STUDY_HOURS',
+      payload: {
+        'topicId': topicId,
+        'isCompleted': isCompleted,
+        'actualHours': actualHours,
+      },
+    );
   }
 
   Future<void> logStudyHours({
@@ -79,17 +75,16 @@ class ProgressRepository {
     required double hoursStudied,
     int topicsCompleted = 0,
   }) async {
-    final payload = {
-      'studyDate': studyDate,
-      'hoursStudied': hoursStudied,
-      'topicsCompleted': topicsCompleted,
-    };
-    if (!await _isOnline()) {
-      await _offlineQueue.enqueue(type: 'LOG_STUDY', payload: payload);
-      return;
-    }
-    ApiCallTracker.instance.record('POST ${ApiEndpoints.logStudy}');
-    await _client.dio.post(ApiEndpoints.logStudy, data: payload);
+    await _offlineQueue.enqueue(
+      entityType: 'STUDY_LOG',
+      entityId: studyDate,
+      action: 'LOG_STUDY_HOURS',
+      payload: {
+        'studyDate': studyDate,
+        'hoursStudied': hoursStudied,
+        'topicsCompleted': topicsCompleted,
+      },
+    );
   }
 
   /// Updates cached subject detail immediately (no network).
@@ -172,15 +167,17 @@ class ProgressRepository {
     data['totalStudyHours'] = totalStudyHours;
   }
 
-  /// Fire-and-forget API sync after local cache is already updated.
+  /// Fire-and-forget: patch local cache then queue for SYNC.
   void persistTopicProgressInBackground({
+    required int subjectId,
     required int topicId,
     required bool isCompleted,
     required double actualHours,
     double? studyHoursDelta,
     String? studyDate,
   }) {
-    unawaited(_persistTopicProgress(
+    unawaited(_persistLocally(
+      subjectId: subjectId,
       topicId: topicId,
       isCompleted: isCompleted,
       actualHours: actualHours,
@@ -189,35 +186,35 @@ class ProgressRepository {
     ));
   }
 
-  Future<void> _persistTopicProgress({
+  Future<void> _persistLocally({
+    required int subjectId,
     required int topicId,
     required bool isCompleted,
     required double actualHours,
     double? studyHoursDelta,
     String? studyDate,
   }) async {
-    try {
-      await markTopicComplete(
-        topicId: topicId,
-        isCompleted: isCompleted,
-        actualHours: actualHours,
+    await patchTopicInCache(
+      subjectId: subjectId,
+      topicId: topicId,
+      actualHours: actualHours,
+      isCompleted: isCompleted,
+      status: isCompleted ? 'COMPLETED' : (actualHours > 0 ? 'IN_PROGRESS' : null),
+    );
+    await markTopicComplete(
+      topicId: topicId,
+      isCompleted: isCompleted,
+      actualHours: actualHours,
+    );
+    if (studyHoursDelta != null && studyHoursDelta > 0 && studyDate != null) {
+      await logStudyHours(
+        studyDate: studyDate,
+        hoursStudied: studyHoursDelta,
       );
-      if (studyHoursDelta != null &&
-          studyHoursDelta > 0 &&
-          studyDate != null) {
-        await logStudyHours(
-          studyDate: studyDate,
-          hoursStudied: studyHoursDelta,
-        );
-      }
-    } catch (_) {
-      // Local cache is already updated; offline queue handles failures.
     }
   }
 
   Future<List<TopicModel>> getTopicsByChapter(int chapterId) async {
-    final response = await _client.dio.get(ApiEndpoints.topicsByChapter(chapterId));
-    final list = response.data['data'] as List<dynamic>;
-    return list.map((e) => TopicModel.fromJson(e as Map<String, dynamic>)).toList();
+    throw UnimplementedError('Use cached subject detail offline.');
   }
 }
