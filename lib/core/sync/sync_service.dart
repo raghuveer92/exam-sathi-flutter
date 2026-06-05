@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:logger/logger.dart';
 
 import '../local/local_store.dart';
@@ -67,8 +68,15 @@ class SyncService {
   }
 
   Future<bool> isOnline() async {
-    final results = await Connectivity().checkConnectivity();
-    return results.any((r) => r != ConnectivityResult.none);
+    // connectivity_plus often reports offline on Flutter web even when the browser
+    // has network — rely on actual API attempts instead.
+    if (kIsWeb) return true;
+    try {
+      final results = await Connectivity().checkConnectivity();
+      return results.any((r) => r != ConnectivityResult.none);
+    } catch (_) {
+      return true;
+    }
   }
 
   void _setStatus(SyncStatus status) {
@@ -86,7 +94,7 @@ class SyncService {
   Future<void> flushOfflineQueue() => _offlineQueue.flush();
 
   /// Waits for an in-flight sync or starts a new one.
-  Future<void> fullInitialSync({bool incremental = false}) async {
+  Future<void> fullInitialSync({bool incremental = false, bool force = false}) async {
     if (_activeSync != null) {
       return _activeSync!.future;
     }
@@ -96,7 +104,7 @@ class SyncService {
     _setStatus(SyncStatus.syncing);
 
     try {
-      if (!await isOnline()) {
+      if (!force && !await isOnline()) {
         _setStatus(SyncStatus.offline);
         return;
       }
@@ -148,9 +156,10 @@ class SyncService {
     final data = await _syncRepository.syncBundle(since: since);
 
     final dashboard = data['dashboard'];
-    if (dashboard != null) {
+    if (dashboard is Map<String, dynamic>) {
       await _store.putJson(LocalStore.dashboardKey, dashboard);
-      final user = (dashboard as Map<String, dynamic>)['user'];
+      _dashboardRepository.cacheEmbeddedDashboardProgress(dashboard);
+      final user = dashboard['user'];
       if (user != null) {
         await _store.putJson(LocalStore.userProfileKey, user);
       }
@@ -216,7 +225,7 @@ class SyncService {
     }
   }
 
-  Future<void> refreshAll() async {
-    await fullInitialSync(incremental: false);
+  Future<void> refreshAll({bool force = true}) async {
+    await fullInitialSync(incremental: false, force: force);
   }
 }

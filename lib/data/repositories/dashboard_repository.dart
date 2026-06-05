@@ -96,15 +96,36 @@ class DashboardRepository {
     return const [];
   }
 
+  void cacheEmbeddedDashboardProgress(Map<String, dynamic> data) {
+    final progress = data['subjectProgress'];
+    if (progress is! List || progress.isEmpty) return;
+    final user = data['user'];
+    if (user is! Map<String, dynamic>) return;
+    final examId = user['selectedExamId'];
+    if (examId == null) return;
+    _store.putJson(_store.subjectProgressKey((examId as num).toInt()), progress);
+  }
+
   /// Build subject groups purely from local cache (never hits network).
   Future<List<ExamSubjectsCacheGroup>> buildSubjectGroupsFromCache() async {
     final exams = await resolveMyExamsFromCache();
+    final dashboard = await getDashboardCached();
     final groups = <ExamSubjectsCacheGroup>[];
 
     for (final exam in exams) {
-      final subjects = resolveVisibleSubjects(exam.examId);
-      final progressRows =
+      var progressRows =
           getSubjectProgressCached(exam.examId) ?? const <SubjectProgressModel>[];
+      if (progressRows.isEmpty &&
+          dashboard != null &&
+          exam.isActive &&
+          dashboard.subjectProgress.isNotEmpty) {
+        progressRows = dashboard.subjectProgress;
+      }
+
+      var subjects = resolveVisibleSubjects(exam.examId);
+      if (subjects.isEmpty && progressRows.isNotEmpty) {
+        subjects = progressRows.map((p) => p.toSubjectModel(exam.examId)).toList();
+      }
       if (subjects.isEmpty && progressRows.isEmpty) continue;
 
       groups.add(ExamSubjectsCacheGroup(
@@ -137,6 +158,7 @@ class DashboardRepository {
       final response = await _client.dio.get(ApiEndpoints.dashboard);
       final data = response.data['data'] as Map<String, dynamic>;
       await _store.putJson(LocalStore.dashboardKey, data);
+      cacheEmbeddedDashboardProgress(data);
       final user = data['user'];
       if (user != null) {
         await _store.putJson(LocalStore.userProfileKey, user);

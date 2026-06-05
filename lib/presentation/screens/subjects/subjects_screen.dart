@@ -8,7 +8,6 @@ import '../../../data/models/subject_model.dart';
 import '../../../data/models/subject_progress_model.dart';
 import '../../../data/models/user_exam_model.dart';
 import '../../../data/repositories/dashboard_repository.dart';
-import '../../widgets/offline_mode_banner.dart';
 import '../../widgets/sync_refresh_button.dart';
 
 class SubjectsScreen extends StatefulWidget {
@@ -107,10 +106,16 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
       _error = null;
     });
     try {
-      await GetIt.I<SyncService>().refreshAll();
+      await GetIt.I<SyncService>().refreshAll(force: true);
+      final exams = await _repo.getMyExams(forceRemote: true);
+      for (final exam in exams) {
+        await _repo.getSubjectProgressByExam(exam.examId, forceRemote: true);
+        await _repo.getVisibleSubjectsByExam(exam.examId, forceRemote: true);
+      }
       _loadFromLocal();
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
+      rethrow;
     } finally {
       if (mounted) setState(() => _backgroundSyncing = false);
     }
@@ -141,11 +146,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
           SyncRefreshButton(onRefreshed: _manualRefresh),
         ],
       ),
-      body: Column(
-        children: [
-          const OfflineModeBanner(),
-          Expanded(
-            child: _loading && _groups.isEmpty
+      body: _loading && _groups.isEmpty
                 ? const Center(child: CircularProgressIndicator())
                 : _groups.isEmpty
                     ? Center(
@@ -170,9 +171,6 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
                           ],
                         ),
                       ),
-          ),
-        ],
-      ),
     );
   }
 

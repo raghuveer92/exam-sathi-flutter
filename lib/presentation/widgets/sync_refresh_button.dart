@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:get_it/get_it.dart';
 
-import '../../core/sync/sync_service.dart';
-
-/// Manual sync trigger for major screens (pull-to-refresh companion).
+/// Manual sync trigger — delegates refresh logic to the parent screen.
 class SyncRefreshButton extends StatefulWidget {
   const SyncRefreshButton({
     super.key,
@@ -25,7 +22,6 @@ class _SyncRefreshButtonState extends State<SyncRefreshButton> {
     if (_syncing) return;
     setState(() => _syncing = true);
     try {
-      await GetIt.I<SyncService>().refreshAll();
       await widget.onRefreshed();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
