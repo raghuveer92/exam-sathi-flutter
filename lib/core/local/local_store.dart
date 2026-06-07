@@ -16,6 +16,7 @@ class LocalStore {
   static const String userProfileKey = 'user_profile';
   static const String syncStatusKey = 'sync_status';
   static const String initialDownloadCompleteKey = 'initial_download_complete';
+  static const String cachedUserIdKey = 'cached_user_id';
 
   Box<String>? _box;
 
@@ -70,5 +71,21 @@ class LocalStore {
 
   Future<void> resetInitialDownloadComplete() async {
     await deleteKey(initialDownloadCompleteKey);
+  }
+
+  /// Clears user-specific study data (used when a different account logs in).
+  /// Shared syllabus catalog caches are preserved.
+  Future<void> clearUserStudyData() async {
+    final box = _box;
+    if (box == null) return;
+    final keys = box.keys.map((k) => k.toString()).toList();
+    for (final key in keys) {
+      if (key == syncCatalogMasterKey ||
+          key == syncCatalogAtKey ||
+          key == catalogKey) {
+        continue;
+      }
+      await deleteKey(key);
+    }
   }
 }

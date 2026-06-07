@@ -118,10 +118,14 @@ class SyncService {
     var uploadOk = true;
     try {
       uploadOk = await _uploadPending((p) {});
-      await _downloadAll(
-        onProgress: (_) {},
-        incremental: true,
-      );
+      if (uploadOk) {
+        await _downloadAll(
+          onProgress: (_) {},
+          incremental: true,
+        );
+      } else {
+        _logger.w('Skipping download — pending study changes were not uploaded');
+      }
       await _offlineQueue.discardResolvedActiveExamItems();
       _offlineQueue.refreshPendingCount();
       if (!uploadOk) {
@@ -146,6 +150,7 @@ class SyncService {
     var allOk = true;
 
     await _coalesceSupersededTopicProgressItems();
+    await _coalescePendingStudyLogs();
 
     for (final item in List<Map<String, dynamic>>.from(_offlineQueue.pendingItems)) {
       final action = item['action'] as String?;
@@ -214,6 +219,56 @@ class SyncService {
     return action == 'COMPLETE_TOPIC' ||
         action == 'ADD_STUDY_HOURS' ||
         type == 'TOPIC_PROGRESS';
+  }
+
+  bool _isStudyLogItem(Map<String, dynamic> item) {
+    final action = item['action'] as String?;
+    final type = item['type'] as String? ?? action;
+    return action == 'LOG_STUDY_HOURS' || type == 'LOG_STUDY';
+  }
+
+  /// Sum pending daily study-log deltas per date into one upload row.
+  Future<void> _coalescePendingStudyLogs() async {
+    final pending = _offlineQueue.pendingItems;
+    final sumsByDate = <String, _StudyLogAggregate>{};
+
+    for (final item in pending) {
+      if (!_isStudyLogItem(item)) continue;
+      final payload = item['payload'];
+      if (payload is! Map<String, dynamic>) continue;
+      final studyDate = payload['studyDate'] as String?;
+      final hours = (payload['hoursStudied'] as num?)?.toDouble();
+      if (studyDate == null || hours == null) continue;
+
+      final agg = sumsByDate.putIfAbsent(studyDate, _StudyLogAggregate.new);
+      agg.hours += hours;
+      agg.topics += (payload['topicsCompleted'] as num?)?.toInt() ?? 0;
+      agg.clientIds.add(item['clientId'] as String);
+      agg.keepClientId ??= item['clientId'] as String?;
+      agg.payloadTemplate = payload;
+    }
+
+    for (final entry in sumsByDate.entries) {
+      if (entry.value.clientIds.length <= 1) continue;
+
+      final studyDate = entry.key;
+      final agg = entry.value;
+      final keepId = agg.keepClientId;
+      if (keepId == null) continue;
+
+      for (final clientId in agg.clientIds) {
+        if (clientId != null && clientId != keepId) {
+          await _offlineQueue.removeByClientId(clientId);
+        }
+      }
+
+      await _offlineQueue.updatePayloadByClientId(keepId, {
+        ...?agg.payloadTemplate,
+        'studyDate': studyDate,
+        'hoursStudied': agg.hours,
+        'topicsCompleted': agg.topics,
+      });
+    }
   }
 
   Future<void> _downloadAll({
@@ -388,10 +443,13 @@ class SyncService {
       for (final entry in progressMap.entries) {
         final examId = int.tryParse(entry.key.toString());
         if (examId == null) continue;
-        await _store.putJson(
-          _store.subjectProgressKey(examId),
-          entry.value as List<dynamic>,
+        final remote = entry.value as List<dynamic>;
+        final local = _store.getJsonList(_store.subjectProgressKey(examId));
+        final merged = _dashboardRepository.mergeSubjectProgressLists(
+          local,
+          remote,
         );
+        await _store.putJson(_store.subjectProgressKey(examId), merged);
       }
     }
 
@@ -431,4 +489,12 @@ class SyncService {
   /// Deprecated — no automatic sync.
   Future<void> fullInitialSync({bool incremental = false, bool force = false}) =>
       manualSync();
+}
+
+class _StudyLogAggregate {
+  double hours = 0;
+  int topics = 0;
+  final clientIds = <String?>[];
+  String? keepClientId;
+  Map<String, dynamic>? payloadTemplate;
 }

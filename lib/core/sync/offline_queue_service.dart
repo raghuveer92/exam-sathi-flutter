@@ -140,6 +140,20 @@ class OfflineQueueService {
     await _writeQueue(queue);
   }
 
+  Future<void> updatePayloadByClientId(
+    String clientId,
+    Map<String, dynamic> payload,
+  ) async {
+    final queue = _readQueue();
+    for (final item in queue) {
+      if (item['clientId'] == clientId) {
+        item['payload'] = payload;
+        break;
+      }
+    }
+    await _writeQueue(queue);
+  }
+
   /// Drop active-exam queue rows already reflected in cached profile.
   Future<void> discardResolvedActiveExamItems() async {
     final profile = _store.getJson(LocalStore.userProfileKey);

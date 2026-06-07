@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/subject_detail_model.dart';
 import '../models/topic_model.dart';
@@ -27,6 +28,7 @@ class ProgressRepository {
   final LocalStore _store;
   final OfflineQueueService _offlineQueue;
   final DashboardRepository _dashboardRepository;
+  final _uuid = const Uuid();
 
   Future<SubjectDetailModel?> getSubjectDetailCached(int subjectId) async {
     final data = _store.getJson(_store.subjectDetailKey(subjectId));
@@ -52,8 +54,10 @@ class ProgressRepository {
       ApiCallTracker.instance.record('GET ${ApiEndpoints.subjectDetail(subjectId)}');
       final response = await _client.dio.get(ApiEndpoints.subjectDetail(subjectId));
       final data = response.data['data'] as Map<String, dynamic>;
-      await _store.putJson(_store.subjectDetailKey(subjectId), data);
-      return SubjectDetailModel.fromJson(data);
+      final localMap = _store.getJson(_store.subjectDetailKey(subjectId));
+      final merged = _mergeSubjectDetailWithLocal(data, localMap);
+      await _store.putJson(_store.subjectDetailKey(subjectId), merged);
+      return SubjectDetailModel.fromJson(merged);
     } catch (_) {
       if (cached != null) return cached;
       final fromCatalog = await _materializeSubjectDetailFromCatalog(subjectId);
@@ -179,6 +183,62 @@ class ProgressRepository {
     };
   }
 
+  /// Merge server subject detail without discarding higher local topic hours.
+  Map<String, dynamic> _mergeSubjectDetailWithLocal(
+    Map<String, dynamic> remote,
+    Map<String, dynamic>? local,
+  ) {
+    if (local == null) return remote;
+
+    final localTopics = <int, Map<String, dynamic>>{};
+    final localChapters = local['chapters'];
+    if (localChapters is List) {
+      for (final chapter in localChapters) {
+        if (chapter is! Map<String, dynamic>) continue;
+        final topics = chapter['topics'];
+        if (topics is! List) continue;
+        for (final topic in topics) {
+          if (topic is! Map<String, dynamic>) continue;
+          final id = (topic['id'] as num?)?.toInt();
+          if (id != null) localTopics[id] = topic;
+        }
+      }
+    }
+
+    final merged = Map<String, dynamic>.from(remote);
+    final remoteChapters = merged['chapters'];
+    if (remoteChapters is! List) return merged;
+
+    for (final chapter in remoteChapters) {
+      if (chapter is! Map<String, dynamic>) continue;
+      final topics = chapter['topics'];
+      if (topics is! List) continue;
+      for (final topic in topics) {
+        if (topic is! Map<String, dynamic>) continue;
+        final id = (topic['id'] as num?)?.toInt();
+        if (id == null) continue;
+        final localTopic = localTopics[id];
+        if (localTopic == null) continue;
+
+        final localHours =
+            ((localTopic['actualHours'] as num?) ?? 0).toDouble();
+        final remoteHours = ((topic['actualHours'] as num?) ?? 0).toDouble();
+        if (localHours > remoteHours) {
+          topic['actualHours'] = localHours;
+        }
+        if (localTopic['isCompleted'] == true) {
+          topic['isCompleted'] = true;
+          topic['status'] = 'COMPLETED';
+        } else if (localHours > remoteHours && localHours > 0) {
+          topic['status'] = localTopic['status'] ?? 'IN_PROGRESS';
+        }
+      }
+    }
+
+    _recalculateSubjectStats(merged);
+    return merged;
+  }
+
   /// Queue-only write — synced when user taps SYNC.
   Future<void> markTopicComplete({
     required int topicId,
@@ -259,15 +319,20 @@ class ProgressRepository {
     required String studyDate,
     required double hoursStudied,
     int topicsCompleted = 0,
+    int? topicId,
   }) async {
+    final sessionId = _uuid.v4();
     await _offlineQueue.enqueue(
       entityType: 'STUDY_LOG',
-      entityId: studyDate,
+      entityId: '$studyDate-$sessionId',
       action: 'LOG_STUDY_HOURS',
       payload: {
+        'sessionId': sessionId,
+        if (topicId != null) 'topicId': topicId,
         'studyDate': studyDate,
         'hoursStudied': hoursStudied,
         'topicsCompleted': topicsCompleted,
+        'createdAt': DateTime.now().toIso8601String(),
       },
     );
   }
@@ -420,6 +485,7 @@ class ProgressRepository {
       await logStudyHours(
         studyDate: studyDate,
         hoursStudied: studyHoursDelta,
+        topicId: topicId,
       );
     }
 

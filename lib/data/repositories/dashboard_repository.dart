@@ -90,17 +90,123 @@ class DashboardRepository {
     List<dynamic>? bundleMyExams,
     Map<String, dynamic>? profileUser,
   }) async {
-    final merged = _mergeDailyTargetIntoDashboard(
+    final localDash = _store.getJson(LocalStore.dashboardKey);
+    var merged = _mergeDailyTargetIntoDashboard(
       remote,
       bundleMyExams: bundleMyExams ?? _store.getJsonList(LocalStore.myExamsKey),
       profileUser: profileUser ?? _store.getJson(LocalStore.userProfileKey),
     );
+    merged = _mergeStudyProgressIntoDashboard(merged, localDash);
     await _store.putJson(LocalStore.dashboardKey, merged);
     cacheEmbeddedDashboardProgress(merged);
     final user = merged['user'];
     if (user != null) {
       await _store.putJson(LocalStore.userProfileKey, user);
     }
+  }
+
+  /// Merge exam-level subject progress rows — keep higher completed counts.
+  List<Map<String, dynamic>> mergeSubjectProgressLists(
+    List<dynamic>? local,
+    List<dynamic> remote,
+  ) {
+    final bySubject = <int, Map<String, dynamic>>{};
+
+    void ingest(List<dynamic>? rows) {
+      if (rows == null) return;
+      for (final raw in rows) {
+        if (raw is! Map<String, dynamic>) continue;
+        final subjectId = (raw['subjectId'] as num?)?.toInt();
+        if (subjectId == null) continue;
+        final completed = ((raw['completedTopics'] as num?) ?? 0).toInt();
+        final existing = bySubject[subjectId];
+        if (existing == null) {
+          bySubject[subjectId] = Map<String, dynamic>.from(raw);
+          continue;
+        }
+        final bestCompleted = math.max(
+          ((existing['completedTopics'] as num?) ?? 0).toInt(),
+          completed,
+        );
+        if (bestCompleted > ((existing['completedTopics'] as num?) ?? 0).toInt()) {
+          existing['completedTopics'] = bestCompleted;
+          existing['completionPercent'] = raw['completionPercent'];
+        }
+      }
+    }
+
+    ingest(local);
+    ingest(remote);
+    return bySubject.values.toList();
+  }
+
+  Map<String, dynamic> _mergeStudyProgressIntoDashboard(
+    Map<String, dynamic> remote,
+    Map<String, dynamic>? local,
+  ) {
+    if (local == null) return remote;
+
+    final merged = Map<String, dynamic>.from(remote);
+    merged['todayHours'] = math.max(
+      ((merged['todayHours'] as num?) ?? 0).toDouble(),
+      ((local['todayHours'] as num?) ?? 0).toDouble(),
+    );
+
+    final remoteCompleted = ((merged['completedTopics'] as num?) ?? 0).toInt();
+    final localCompleted = ((local['completedTopics'] as num?) ?? 0).toInt();
+    if (localCompleted > remoteCompleted) {
+      merged['completedTopics'] = localCompleted;
+      final total = ((merged['totalTopics'] as num?) ?? 0).toInt();
+      merged['remainingTopics'] = math.max(0, total - localCompleted);
+      merged['overallCompletionPercent'] =
+          total == 0 ? 0.0 : (localCompleted * 100.0 / total);
+    }
+
+    merged['weeklyLogs'] = _mergeWeeklyLogs(
+      merged['weeklyLogs'] as List<dynamic>?,
+      local['weeklyLogs'] as List<dynamic>?,
+    );
+
+    merged['subjectProgress'] = mergeSubjectProgressLists(
+      local['subjectProgress'] as List<dynamic>?,
+      merged['subjectProgress'] as List<dynamic>? ?? const [],
+    );
+
+    return merged;
+  }
+
+  List<Map<String, dynamic>> _mergeWeeklyLogs(
+    List<dynamic>? remote,
+    List<dynamic>? local,
+  ) {
+    final byDate = <String, Map<String, dynamic>>{};
+
+    void ingest(List<dynamic>? rows) {
+      if (rows == null) return;
+      for (final raw in rows) {
+        if (raw is! Map) continue;
+        final row = Map<String, dynamic>.from(raw);
+        final date = row['studyDate'] as String?;
+        if (date == null) continue;
+        final existing = byDate[date];
+        if (existing == null) {
+          byDate[date] = row;
+          continue;
+        }
+        existing['hoursStudied'] = math.max(
+          ((existing['hoursStudied'] as num?) ?? 0).toDouble(),
+          ((row['hoursStudied'] as num?) ?? 0).toDouble(),
+        );
+        existing['topicsCompleted'] = math.max(
+          ((existing['topicsCompleted'] as num?) ?? 0).toInt(),
+          ((row['topicsCompleted'] as num?) ?? 0).toInt(),
+        );
+      }
+    }
+
+    ingest(remote);
+    ingest(local);
+    return byDate.values.toList();
   }
 
   Map<String, dynamic> _mergeDailyTargetIntoDashboard(

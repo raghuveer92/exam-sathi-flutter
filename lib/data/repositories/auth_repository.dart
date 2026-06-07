@@ -58,6 +58,12 @@ class AuthRepository {
   }
 
   Future<void> cacheUser(UserModel user) async {
+    final previousId = _store.getString(LocalStore.cachedUserIdKey);
+    final nextId = user.id.toString();
+    if (previousId != null && previousId != nextId) {
+      await _store.clearUserStudyData();
+    }
+    await _store.putString(LocalStore.cachedUserIdKey, nextId);
     await _store.putJson(LocalStore.userProfileKey, user.toJson());
   }
 
