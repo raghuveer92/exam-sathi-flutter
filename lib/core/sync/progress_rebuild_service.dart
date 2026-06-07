@@ -30,7 +30,6 @@ class ProgressRebuildService {
 
   /// Rebuild subject-progress rows and exam-card % for one exam.
   Future<void> rebuildExam(int examId, {int? userExamId}) async {
-    final subjects = _dashboardRepository.resolveVisibleSubjects(examId);
     final progressRows = <Map<String, dynamic>>[];
     var examTotal = 0;
     var examCompleted = 0;
@@ -38,6 +37,14 @@ class ProgressRebuildService {
     final enrollmentId = userExamId ??
         await _dashboardRepository.resolveUserExamIdForExam(examId);
     if (enrollmentId == null) return;
+
+    var subjects = _dashboardRepository.resolveVisibleSubjects(examId);
+    if (subjects.isEmpty) {
+      final progress = _dashboardRepository.getSubjectProgressCached(examId);
+      if (progress != null && progress.isNotEmpty) {
+        subjects = progress.map((p) => p.toSubjectModel(examId)).toList();
+      }
+    }
 
     for (final subject in subjects) {
       final data =

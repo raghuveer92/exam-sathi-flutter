@@ -318,7 +318,10 @@ class ProgressRepository {
         },
       );
       if (userExamId != null) {
-        await markTopicProgressSynced(topicId, userExamId: userExamId);
+        await markTopicProgressSynced(
+          topicId: topicId,
+          userExamId: userExamId,
+        );
       }
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) {

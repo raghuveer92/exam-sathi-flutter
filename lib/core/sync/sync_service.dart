@@ -4,6 +4,7 @@ import 'package:logger/logger.dart';
 
 import '../local/local_store.dart';
 import '../network/connectivity_helper.dart';
+import '../../data/models/subject_progress_model.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../core/sync/progress_rebuild_service.dart';
 import '../../data/repositories/dashboard_repository.dart';
@@ -329,7 +330,7 @@ class SyncService {
         }
       }
 
-      final subjects = await _dashboardRepository.getVisibleSubjectsByExam(
+      final subjects = await _dashboardRepository.resolveSubjectsForExam(
         exam.examId,
         forceRemote: true,
       );
@@ -494,6 +495,23 @@ class SyncService {
           remote,
         );
         await _store.putJson(_store.subjectProgressKey(examId), merged);
+
+        final visible = _dashboardRepository.getVisibleSubjectsCached(examId);
+        if (visible == null || visible.isEmpty) {
+          final subjects = merged
+              .whereType<Map<String, dynamic>>()
+              .map(
+                (row) => SubjectProgressModel.fromJson(row)
+                    .toSubjectModel(examId),
+              )
+              .toList();
+          if (subjects.isNotEmpty) {
+            await _store.putJson(
+              _store.visibleSubjectsKey(examId),
+              subjects.map((s) => s.toJson()).toList(),
+            );
+          }
+        }
       }
     }
 
