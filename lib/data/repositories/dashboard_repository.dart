@@ -385,6 +385,32 @@ class DashboardRepository {
     return null;
   }
 
+  /// Persist weekly study logs from GET /progress/weekly into dashboard cache.
+  Future<void> storeWeeklyLogsFromServer(List<dynamic> logs) async {
+    final dashData = _store.getJson(LocalStore.dashboardKey);
+    if (dashData == null) return;
+
+    final dash = Map<String, dynamic>.from(dashData);
+    dash['weeklyLogs'] = _mergeWeeklyLogs(
+      logs,
+      dash['weeklyLogs'] as List<dynamic>?,
+    );
+
+    final today = _fmtLocalDate(DateTime.now());
+    for (final raw in logs) {
+      if (raw is! Map) continue;
+      if (raw['studyDate'] == today) {
+        dash['todayHours'] = math.max(
+          ((dash['todayHours'] as num?) ?? 0).toDouble(),
+          ((raw['hoursStudied'] as num?) ?? 0).toDouble(),
+        );
+      }
+    }
+
+    await _store.putJson(LocalStore.dashboardKey, dash);
+    cacheEmbeddedDashboardProgress(dash);
+  }
+
   /// Keeps dashboard + subject-progress caches in sync after local topic/hour edits.
   Future<void> applyLocalProgressUpdate({
     required SubjectDetailModel subjectDetail,

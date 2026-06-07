@@ -10,6 +10,7 @@ import '../../data/repositories/dashboard_repository.dart';
 import '../../data/repositories/mock_test_repository.dart';
 import '../../data/repositories/progress_repository.dart';
 import '../../data/repositories/sync_repository.dart';
+import 'sync_download_stats.dart';
 import 'offline_queue_service.dart';
 import 'sync_progress.dart';
 
@@ -127,7 +128,6 @@ class SyncService {
           onProgress: (_) {},
           incremental: true,
         );
-        await _progressRebuildService.rebuildAll();
       } else {
         _logger.w('Skipping download — pending study changes were not uploaded');
       }
@@ -281,6 +281,7 @@ class SyncService {
     required bool incremental,
   }) async {
     _emit(SyncStep.preparing, onProgress);
+    final stats = SyncDownloadStats();
 
     _emit(SyncStep.userData, onProgress);
     try {
@@ -289,13 +290,14 @@ class SyncService {
       _logger.w('Profile refresh skipped before sync', error: e, stackTrace: st);
     }
     try {
-      await syncBundle(incremental: incremental);
+      stats.studyProgressRows = await syncBundle(incremental: incremental);
     } catch (e, st) {
       _logger.w('Bundle sync failed, using legacy APIs', error: e, stackTrace: st);
       await syncLegacyFallback();
     }
 
     final exams = await _dashboardRepository.resolveMyExamsFromCache();
+    stats.exams = exams.length;
     var subjectCount = 0;
     for (final exam in exams) {
       subjectCount += (await _dashboardRepository.getVisibleSubjectsByExam(
@@ -309,10 +311,23 @@ class SyncService {
     _emit(SyncStep.subjects, onProgress, current: 0, total: subjectCount);
 
     for (final exam in exams) {
+      if (!exam.isActive) {
+        try {
+          await _dashboardRepository.setActiveMyExam(exam.id);
+        } catch (e, st) {
+          _logger.w(
+            'Could not set active exam ${exam.id} before subject download',
+            error: e,
+            stackTrace: st,
+          );
+        }
+      }
+
       final subjects = await _dashboardRepository.getVisibleSubjectsByExam(
         exam.examId,
         forceRemote: true,
       );
+      stats.subjects += subjects.length;
       for (final subject in subjects) {
         subjectIndex++;
         _emit(
@@ -323,10 +338,13 @@ class SyncService {
           detail: subject.name,
         );
         try {
-          await _progressRepository.getSubjectDetail(
+          final detail = await _progressRepository.getSubjectDetail(
             subject.id,
             forceRemote: true,
           );
+          for (final chapter in detail.chapters) {
+            stats.topics += chapter.topics.length;
+          }
         } catch (e, st) {
           _logger.w('Subject ${subject.id} download skipped',
               error: e, stackTrace: st);
@@ -337,6 +355,10 @@ class SyncService {
     _emit(SyncStep.topics, onProgress, current: subjectCount, total: subjectCount);
 
     await syncCatalog(incremental: incremental);
+
+    await _progressRepository.applyTopicProgressTableToSubjectDetails();
+    stats.dailyStudyLogs =
+        await _progressRepository.downloadWeeklyStudyLogs();
 
     final topicIds = await _collectTopicIds();
     _emit(SyncStep.mockTests, onProgress, current: 0, total: topicIds.length);
@@ -353,16 +375,19 @@ class SyncService {
       );
       try {
         await _mockTestRepository.syncTopicForOffline(topicId);
+        stats.mockTests++;
       } catch (e, st) {
         _logger.w('Mock test sync skipped $topicId', error: e, stackTrace: st);
       }
     }
+    stats.questions = stats.mockTests;
 
     _emit(SyncStep.progress, onProgress);
     try {
       await _mockTestRepository.getPerformance(forceRemote: true);
     } catch (_) {}
     await _progressRebuildService.rebuildAll();
+    stats.log(_logger);
   }
 
   Future<List<int>> _collectTopicIds() async {
@@ -406,7 +431,8 @@ class SyncService {
     );
   }
 
-  Future<void> syncBundle({bool incremental = false}) async {
+  /// Returns count of ingested study_progress rows from bundle.
+  Future<int> syncBundle({bool incremental = false}) async {
     final since = incremental ? lastBundleSync : null;
     final data = await _syncRepository.syncBundle(since: since);
 
@@ -459,17 +485,18 @@ class SyncService {
       }
     }
 
+    var ingestedProgress = 0;
     final changedProgress = data['changedProgress'];
     if (changedProgress is List && changedProgress.isNotEmpty) {
-      await _progressRepository.applySyncedTopicProgress(changedProgress);
+      ingestedProgress =
+          await _progressRepository.ingestSyncedTopicProgress(changedProgress);
     }
-
-    await _progressRebuildService.rebuildAll();
 
     final serverTime = data['serverTime'] as String?;
     if (serverTime != null) {
       await _store.putString(LocalStore.syncBundleAtKey, serverTime);
     }
+    return ingestedProgress;
   }
 
   Future<void> syncCatalog({bool incremental = false}) async {

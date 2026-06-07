@@ -99,6 +99,10 @@ class ProgressRebuildService {
     }
 
     final dash = Map<String, dynamic>.from(dashData);
+    final todayHours = dash['todayHours'];
+    final weeklyLogs = dash['weeklyLogs'];
+    final todayTopicsCompleted = dash['todayTopicsCompleted'];
+
     dash['totalTopics'] = totalTopics;
     dash['completedTopics'] = completedTopics;
     dash['remainingTopics'] = math.max(0, totalTopics - completedTopics);
@@ -124,6 +128,12 @@ class ProgressRebuildService {
 
     final myExamsJson = await _dashboardRepository.getMyExamsCached();
     dash['myExams'] = myExamsJson.map((e) => e.toJson()).toList();
+
+    if (todayHours != null) dash['todayHours'] = todayHours;
+    if (weeklyLogs != null) dash['weeklyLogs'] = weeklyLogs;
+    if (todayTopicsCompleted != null) {
+      dash['todayTopicsCompleted'] = todayTopicsCompleted;
+    }
 
     await _store.putJson(LocalStore.dashboardKey, dash);
     _dashboardRepository.cacheEmbeddedDashboardProgress(dash);
