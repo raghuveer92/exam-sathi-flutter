@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -13,6 +14,7 @@ import '../../../data/models/mock_test_model.dart';
 import '../../../data/models/topic_model.dart';
 import '../../../data/repositories/mock_test_repository.dart';
 import '../../../data/repositories/progress_repository.dart';
+import '../../blocs/dashboard/dashboard_bloc.dart';
 
 // ─── Topic status helper ────────────────────────────────────────────────────
 enum _TopicStatus { notStarted, inProgress, completed }
@@ -194,6 +196,9 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
       studyHoursDelta: delta != 0 ? delta : null,
       studyDate: _localTodayDate(),
     );
+    if (mounted) {
+      context.read<DashboardBloc>().add(DashboardRefreshRequested());
+    }
 
     AnalyticsService.logTopicCompleted(
       topicId: topic.id,
@@ -223,6 +228,9 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
       studyHoursDelta: delta != 0 ? delta : null,
       studyDate: _localTodayDate(),
     );
+    if (mounted) {
+      context.read<DashboardBloc>().add(DashboardRefreshRequested());
+    }
 
     AnalyticsService.logStudyHoursAdded(
       hours: hours,

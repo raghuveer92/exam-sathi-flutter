@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/local/local_store.dart';
+import '../../../core/sync/progress_rebuild_service.dart';
 import '../../../core/sync/sync_progress.dart';
 import '../../../core/sync/sync_service.dart';
 import '../../../data/repositories/dashboard_repository.dart';
@@ -38,6 +39,7 @@ class _OfflineSetupScreenState extends State<OfflineSetupScreen> {
         },
       );
       await GetIt.I<DashboardRepository>().syncDailyTargetFromProfile();
+      await GetIt.I<ProgressRebuildService>().rebuildAll();
       await GetIt.I<LocalStore>().markInitialDownloadComplete();
       if (!mounted) return;
       context.go('/home');

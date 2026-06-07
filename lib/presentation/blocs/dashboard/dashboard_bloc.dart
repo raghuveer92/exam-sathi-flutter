@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 
 import '../../../core/sync/offline_queue_service.dart';
+import '../../../core/sync/progress_rebuild_service.dart';
 import '../../../data/models/dashboard_model.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 
@@ -13,14 +14,17 @@ part 'dashboard_state.dart';
 class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
   final DashboardRepository _repository;
   final OfflineQueueService _offlineQueue;
+  final ProgressRebuildService _progressRebuildService;
   Timer? _debounce;
   Timer? _resetTimer;
 
   DashboardBloc({
     required DashboardRepository repository,
     required OfflineQueueService offlineQueue,
+    required ProgressRebuildService progressRebuildService,
   })  : _repository = repository,
         _offlineQueue = offlineQueue,
+        _progressRebuildService = progressRebuildService,
         super(DashboardInitial()) {
     on<DashboardLoadRequested>(_onLoadRequested);
     on<DashboardRefreshRequested>(_onRefreshRequested);
@@ -71,6 +75,7 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
   ) async {
     emit(DashboardLoading());
     try {
+      await _progressRebuildService.rebuildAll();
       final dashboard = await _repository.getDashboard(forceRemote: false);
       emit(DashboardLoaded(dashboard: dashboard));
     } catch (e) {
@@ -83,6 +88,7 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
     Emitter<DashboardState> emit,
   ) async {
     try {
+      await _progressRebuildService.rebuildAll();
       final dashboard = await _repository.getDashboardCached();
       if (dashboard != null) {
         emit(DashboardLoaded(dashboard: dashboard));

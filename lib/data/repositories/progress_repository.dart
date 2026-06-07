@@ -9,7 +9,9 @@ import '../../core/local/api_call_tracker.dart';
 import '../../core/local/local_store.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
+import '../../core/sync/local_tables.dart';
 import '../../core/sync/offline_queue_service.dart';
+import '../../core/sync/progress_rebuild_service.dart';
 import 'dashboard_repository.dart';
 
 /// All reads from local cache. All writes to cache + pending sync queue.
@@ -19,15 +21,18 @@ class ProgressRepository {
     required LocalStore store,
     required OfflineQueueService offlineQueue,
     required DashboardRepository dashboardRepository,
+    required ProgressRebuildService progressRebuildService,
   })  : _client = client,
         _store = store,
         _offlineQueue = offlineQueue,
-        _dashboardRepository = dashboardRepository;
+        _dashboardRepository = dashboardRepository,
+        _progressRebuildService = progressRebuildService;
 
   final ApiClient _client;
   final LocalStore _store;
   final OfflineQueueService _offlineQueue;
   final DashboardRepository _dashboardRepository;
+  final ProgressRebuildService _progressRebuildService;
   final _uuid = const Uuid();
 
   Future<SubjectDetailModel?> getSubjectDetailCached(int subjectId) async {
@@ -281,6 +286,7 @@ class ProgressRepository {
           if (payload['notes'] != null) 'notes': payload['notes'],
         },
       );
+      await markTopicProgressSynced(topicId);
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) {
         await _offlineQueue.removeByClientId(item['clientId'] as String);
@@ -481,11 +487,24 @@ class ProgressRepository {
       isCompleted: isCompleted,
       actualHours: actualHours,
     );
+    await _writeTopicProgressRecord(
+      topicId: topicId,
+      subjectId: subjectId,
+      isCompleted: isCompleted,
+      actualHours: actualHours,
+      syncStatus: LocalTables.syncStatusPending,
+    );
     if (studyHoursDelta != null && studyHoursDelta != 0 && studyDate != null) {
       await logStudyHours(
         studyDate: studyDate,
         hoursStudied: studyHoursDelta,
         topicId: topicId,
+      );
+      await _writeDailyStudyLogRecord(
+        studyDate: studyDate,
+        hoursDelta: studyHoursDelta,
+        topicsDelta: isCompleted && !wasCompleted ? 1 : 0,
+        syncStatus: LocalTables.syncStatusPending,
       );
     }
 
@@ -496,6 +515,130 @@ class ProgressRepository {
       studyHoursDelta: studyHoursDelta ?? 0,
       studyDate: studyDate ?? _localTodayDate(),
     );
+
+    final examId = await _resolveExamIdForSubject(subjectId);
+    if (examId != null) {
+      await _progressRebuildService.rebuildAll();
+    }
+  }
+
+  Future<int?> _resolveExamIdForSubject(int subjectId) async {
+    final exams = await _dashboardRepository.resolveMyExamsFromCache();
+    for (final exam in exams) {
+      final subjects = _dashboardRepository.resolveVisibleSubjects(exam.examId);
+      if (subjects.any((s) => s.id == subjectId)) return exam.examId;
+    }
+    return null;
+  }
+
+  /// Apply server-side study_progress rows from sync bundle (table-level merge).
+  Future<void> applySyncedTopicProgress(List<dynamic> items) async {
+    if (items.isEmpty) return;
+
+    for (final raw in items) {
+      if (raw is! Map<String, dynamic>) continue;
+      final topicId = (raw['topicId'] as num?)?.toInt();
+      final subjectId = (raw['subjectId'] as num?)?.toInt();
+      if (topicId == null || subjectId == null) continue;
+
+      if (_hasPendingTopicProgress(topicId)) continue;
+
+      final isCompleted = raw['isCompleted'] as bool? ?? false;
+      final actualHours = (raw['actualHours'] as num?)?.toDouble() ?? 0.0;
+      final status = raw['status'] as String?;
+
+      await patchTopicInCache(
+        subjectId: subjectId,
+        topicId: topicId,
+        actualHours: actualHours,
+        isCompleted: isCompleted,
+        status: status,
+      );
+
+      await _writeTopicProgressRecord(
+        topicId: topicId,
+        subjectId: subjectId,
+        isCompleted: isCompleted,
+        actualHours: actualHours,
+        syncStatus: LocalTables.syncStatusSynced,
+        updatedAt: raw['updatedAt'] as String?,
+      );
+    }
+  }
+
+  bool _hasPendingTopicProgress(int topicId) {
+    for (final item in _offlineQueue.pendingItems) {
+      final action = item['action'] as String?;
+      final payload = item['payload'];
+      if (payload is! Map<String, dynamic>) continue;
+      if ((payload['topicId'] as num?)?.toInt() != topicId) continue;
+      if (action == 'COMPLETE_TOPIC' ||
+          action == 'ADD_STUDY_HOURS' ||
+          item['type'] == 'TOPIC_PROGRESS') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Future<void> _writeTopicProgressRecord({
+    required int topicId,
+    required int subjectId,
+    required bool isCompleted,
+    required double actualHours,
+    required String syncStatus,
+    String? updatedAt,
+  }) async {
+    final table = Map<String, dynamic>.from(
+      _store.getJson(LocalTables.topicProgress) ?? {},
+    );
+    table['$topicId'] = {
+      'topicId': topicId,
+      'subjectId': subjectId,
+      'isCompleted': isCompleted,
+      'actualHours': actualHours,
+      'syncStatus': syncStatus,
+      'updatedAt': updatedAt ?? DateTime.now().toIso8601String(),
+    };
+    await _store.putJson(LocalTables.topicProgress, table);
+  }
+
+  Future<void> _writeDailyStudyLogRecord({
+    required String studyDate,
+    required double hoursDelta,
+    required int topicsDelta,
+    required String syncStatus,
+  }) async {
+    final table = Map<String, dynamic>.from(
+      _store.getJson(LocalTables.dailyStudyLogs) ?? {},
+    );
+    final existing = table[studyDate];
+    final prevHours = existing is Map<String, dynamic>
+        ? ((existing['hoursStudied'] as num?) ?? 0).toDouble()
+        : 0.0;
+    final prevTopics = existing is Map<String, dynamic>
+        ? ((existing['topicsCompleted'] as num?) ?? 0).toInt()
+        : 0;
+    table[studyDate] = {
+      'studyDate': studyDate,
+      'hoursStudied': prevHours + hoursDelta,
+      'topicsCompleted': prevTopics + topicsDelta,
+      'syncStatus': syncStatus,
+      'updatedAt': DateTime.now().toIso8601String(),
+    };
+    await _store.putJson(LocalTables.dailyStudyLogs, table);
+  }
+
+  Future<void> markTopicProgressSynced(int topicId) async {
+    final table = Map<String, dynamic>.from(
+      _store.getJson(LocalTables.topicProgress) ?? {},
+    );
+    final row = table['$topicId'];
+    if (row is Map<String, dynamic>) {
+      row['syncStatus'] = LocalTables.syncStatusSynced;
+      table['$topicId'] = row;
+      await _store.putJson(LocalTables.topicProgress, table);
+    }
   }
 
   String _localTodayDate() {

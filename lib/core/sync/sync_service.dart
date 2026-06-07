@@ -5,6 +5,7 @@ import 'package:logger/logger.dart';
 import '../local/local_store.dart';
 import '../network/connectivity_helper.dart';
 import '../../data/repositories/auth_repository.dart';
+import '../../core/sync/progress_rebuild_service.dart';
 import '../../data/repositories/dashboard_repository.dart';
 import '../../data/repositories/mock_test_repository.dart';
 import '../../data/repositories/progress_repository.dart';
@@ -23,6 +24,7 @@ class SyncService {
     required AuthRepository authRepository,
     required DashboardRepository dashboardRepository,
     required ProgressRepository progressRepository,
+    required ProgressRebuildService progressRebuildService,
     required MockTestRepository mockTestRepository,
     required Logger logger,
   })  : _store = store,
@@ -31,6 +33,7 @@ class SyncService {
         _authRepository = authRepository,
         _dashboardRepository = dashboardRepository,
         _progressRepository = progressRepository,
+        _progressRebuildService = progressRebuildService,
         _mockTestRepository = mockTestRepository,
         _logger = logger;
 
@@ -40,6 +43,7 @@ class SyncService {
   final AuthRepository _authRepository;
   final DashboardRepository _dashboardRepository;
   final ProgressRepository _progressRepository;
+  final ProgressRebuildService _progressRebuildService;
   final MockTestRepository _mockTestRepository;
   final Logger _logger;
 
@@ -123,6 +127,7 @@ class SyncService {
           onProgress: (_) {},
           incremental: true,
         );
+        await _progressRebuildService.rebuildAll();
       } else {
         _logger.w('Skipping download — pending study changes were not uploaded');
       }
@@ -357,6 +362,7 @@ class SyncService {
     try {
       await _mockTestRepository.getPerformance(forceRemote: true);
     } catch (_) {}
+    await _progressRebuildService.rebuildAll();
   }
 
   Future<List<int>> _collectTopicIds() async {
@@ -452,6 +458,13 @@ class SyncService {
         await _store.putJson(_store.subjectProgressKey(examId), merged);
       }
     }
+
+    final changedProgress = data['changedProgress'];
+    if (changedProgress is List && changedProgress.isNotEmpty) {
+      await _progressRepository.applySyncedTopicProgress(changedProgress);
+    }
+
+    await _progressRebuildService.rebuildAll();
 
     final serverTime = data['serverTime'] as String?;
     if (serverTime != null) {

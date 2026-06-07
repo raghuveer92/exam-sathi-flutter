@@ -416,13 +416,6 @@ class DashboardRepository {
     if (newlyCompleted) {
       dash['todayTopicsCompleted'] =
           ((dash['todayTopicsCompleted'] as num?) ?? 0).toInt() + 1;
-      dash['completedTopics'] =
-          ((dash['completedTopics'] as num?) ?? 0).toInt() + 1;
-      final total = ((dash['totalTopics'] as num?) ?? 0).toInt();
-      final completed = (dash['completedTopics'] as num).toInt();
-      dash['remainingTopics'] = math.max(0, total - completed);
-      dash['overallCompletionPercent'] =
-          total == 0 ? 0.0 : (completed * 100.0 / total);
     }
 
     if (studyHoursDelta != 0 || newlyCompleted) {
@@ -434,11 +427,7 @@ class DashboardRepository {
       );
     }
 
-    final progressRow = _subjectDetailToProgressMap(subjectDetail, examId);
-    _patchSubjectProgressList(dash, progressRow);
     await _store.putJson(LocalStore.dashboardKey, dash);
-
-    await _patchExamSubjectProgressCache(examId, progressRow);
   }
 
   /// Prefer cached subject-detail stats — they reflect local topic edits.

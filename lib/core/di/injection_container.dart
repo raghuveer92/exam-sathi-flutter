@@ -11,6 +11,7 @@ import '../../data/repositories/sync_repository.dart';
 import '../local/local_store.dart';
 import '../network/api_client.dart';
 import '../sync/offline_queue_service.dart';
+import '../sync/progress_rebuild_service.dart';
 import '../sync/sync_service.dart';
 import '../../presentation/blocs/auth/auth_bloc.dart';
 import '../../presentation/blocs/dashboard/dashboard_bloc.dart';
@@ -59,6 +60,10 @@ Future<void> setupDependencies() async {
         store: sl<LocalStore>(),
         offlineQueue: sl<OfflineQueueService>(),
       ));
+  sl.registerLazySingleton<ProgressRebuildService>(() => ProgressRebuildService(
+        store: sl<LocalStore>(),
+        dashboardRepository: sl<DashboardRepository>(),
+      ));
   sl.registerLazySingleton<ExamCatalogRepository>(() => ExamCatalogRepository(
         client: sl<ApiClient>(),
         store: sl<LocalStore>(),
@@ -73,6 +78,7 @@ Future<void> setupDependencies() async {
         store: sl<LocalStore>(),
         offlineQueue: sl<OfflineQueueService>(),
         dashboardRepository: sl<DashboardRepository>(),
+        progressRebuildService: sl<ProgressRebuildService>(),
       ));
 
   sl.registerLazySingleton<SyncService>(() => SyncService(
@@ -82,6 +88,7 @@ Future<void> setupDependencies() async {
         authRepository: sl<AuthRepository>(),
         dashboardRepository: sl<DashboardRepository>(),
         progressRepository: sl<ProgressRepository>(),
+        progressRebuildService: sl<ProgressRebuildService>(),
         mockTestRepository: sl<MockTestRepository>(),
         logger: sl<Logger>(),
       ));
@@ -91,5 +98,6 @@ Future<void> setupDependencies() async {
   sl.registerFactory<DashboardBloc>(() => DashboardBloc(
         repository: sl<DashboardRepository>(),
         offlineQueue: sl<OfflineQueueService>(),
+        progressRebuildService: sl<ProgressRebuildService>(),
       ));
 }
