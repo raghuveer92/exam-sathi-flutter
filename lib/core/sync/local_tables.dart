@@ -9,7 +9,7 @@ abstract final class LocalTables {
   static const cachedUserId = 'cached_user_id';
 
   // ── Raw progress (table-level sync) ───────────────────────────────────────
-  /// Map keyed by topicId → study_progress row + syncStatus.
+  /// Map keyed by `userExamId:topicId` → study_progress row + syncStatus.
   static const topicProgress = 'table_topic_progress';
 
   /// Map keyed by studyDate → daily_study_logs row + syncStatus.
@@ -25,7 +25,11 @@ abstract final class LocalTables {
 
   static String subjectProgress(int examId) => 'subject_progress_$examId';
   static String visibleSubjects(int examId) => 'visible_subjects_$examId';
-  static String subjectDetail(int subjectId) => 'subject_detail_$subjectId';
+  static String subjectDetail(int userExamId, int subjectId) =>
+      'subject_detail_${userExamId}_$subjectId';
+
+  static String topicProgressRowKey(int userExamId, int topicId) =>
+      '$userExamId:$topicId';
 
   /// Standard sync metadata fields on raw records.
   static const syncStatusPending = 'PENDING';

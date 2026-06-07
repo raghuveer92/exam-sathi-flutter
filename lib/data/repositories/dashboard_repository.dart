@@ -459,9 +459,11 @@ class DashboardRepository {
   /// Prefer cached subject-detail stats — they reflect local topic edits.
   List<SubjectProgressModel> _enrichProgressRowsFromSubjectDetails(
     List<SubjectProgressModel> rows,
+    int userExamId,
   ) {
     return rows.map((row) {
-      final data = _store.getJson(_store.subjectDetailKey(row.subjectId));
+      final data =
+          _store.getJson(_store.subjectDetailKey(userExamId, row.subjectId));
       if (data == null) return row;
       try {
         final detail = SubjectDetailModel.fromJson(data);
@@ -643,6 +645,30 @@ class DashboardRepository {
     return const [];
   }
 
+  Future<int?> resolveUserExamIdForExam(int examId) async {
+    final exams = await resolveMyExamsFromCache();
+    for (final exam in exams) {
+      if (exam.examId == examId) return exam.id;
+    }
+    return null;
+  }
+
+  Future<UserExamModel?> resolveUserExamById(int userExamId) async {
+    final exams = await resolveMyExamsFromCache();
+    for (final exam in exams) {
+      if (exam.id == userExamId) return exam;
+    }
+    return null;
+  }
+
+  Future<int?> resolveActiveUserExamId() async {
+    final exams = await resolveMyExamsFromCache();
+    for (final exam in exams) {
+      if (exam.isActive) return exam.id;
+    }
+    return exams.isNotEmpty ? exams.first.id : null;
+  }
+
   /// Visible subjects from cache, or derived from subject progress rows.
   List<SubjectModel> resolveVisibleSubjects(int examId) {
     final visible = getVisibleSubjectsCached(examId);
@@ -709,12 +735,6 @@ class DashboardRepository {
   ) {
     var progressRows =
         getSubjectProgressCached(exam.examId) ?? const <SubjectProgressModel>[];
-    if (progressRows.isEmpty &&
-        dashboard != null &&
-        exam.isActive &&
-        dashboard.subjectProgress.isNotEmpty) {
-      progressRows = dashboard.subjectProgress;
-    }
 
     var subjects = resolveVisibleSubjects(exam.examId);
     if (subjects.isEmpty && progressRows.isNotEmpty) {
@@ -722,7 +742,7 @@ class DashboardRepository {
     }
     if (subjects.isEmpty && progressRows.isEmpty) return null;
 
-    progressRows = _enrichProgressRowsFromSubjectDetails(progressRows);
+    progressRows = _enrichProgressRowsFromSubjectDetails(progressRows, exam.id);
 
     return ExamSubjectsCacheGroup(
       exam: exam,

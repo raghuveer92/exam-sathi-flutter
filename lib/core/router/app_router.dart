@@ -186,20 +186,40 @@ class AppRouter {
                   userExamId:
                       int.parse(state.pathParameters['userExamId']!),
                 ),
+                routes: [
+                  GoRoute(
+                    path: ':subjectId',
+                    builder: (_, state) => SubjectDetailScreen(
+                      userExamId: int.parse(
+                        state.pathParameters['userExamId']!,
+                      ),
+                      subjectId: int.parse(
+                        state.pathParameters['subjectId']!,
+                      ),
+                    ),
+                    routes: [
+                      GoRoute(
+                        path: 'chapter/:chapterId',
+                        builder: (_, state) => TopicListScreen(
+                          chapterId: int.parse(
+                            state.pathParameters['chapterId']!,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
               GoRoute(
                 path: ':subjectId',
-                builder: (_, state) => SubjectDetailScreen(
-                  subjectId: int.parse(state.pathParameters['subjectId']!),
-                ),
-                routes: [
-                  GoRoute(
-                    path: 'chapter/:chapterId',
-                    builder: (_, state) => TopicListScreen(
-                      chapterId: int.parse(state.pathParameters['chapterId']!),
-                    ),
-                  ),
-                ],
+                redirect: (_, state) {
+                  final subjectId = state.pathParameters['subjectId'];
+                  final userExamId = state.uri.queryParameters['userExamId'];
+                  if (userExamId != null && subjectId != null) {
+                    return '/subjects/exam/$userExamId/$subjectId';
+                  }
+                  return '/subjects';
+                },
               ),
             ],
           ),

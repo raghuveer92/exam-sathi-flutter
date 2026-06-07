@@ -35,12 +35,20 @@ class ProgressRebuildService {
     var examTotal = 0;
     var examCompleted = 0;
 
+    final enrollmentId = userExamId ??
+        await _dashboardRepository.resolveUserExamIdForExam(examId);
+    if (enrollmentId == null) return;
+
     for (final subject in subjects) {
-      final data = _store.getJson(_store.subjectDetailKey(subject.id));
+      final data =
+          _store.getJson(_store.subjectDetailKey(enrollmentId, subject.id));
       if (data == null) continue;
 
       _recalculateSubjectStats(data);
-      await _store.putJson(_store.subjectDetailKey(subject.id), data);
+      await _store.putJson(
+        _store.subjectDetailKey(enrollmentId, subject.id),
+        data,
+      );
 
       final detail = SubjectDetailModel.fromJson(data);
       examTotal += detail.totalTopics;

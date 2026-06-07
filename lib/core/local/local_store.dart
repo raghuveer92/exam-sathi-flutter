@@ -57,7 +57,14 @@ class LocalStore {
 
   String subjectProgressKey(int examId) => 'subject_progress_$examId';
   String visibleSubjectsKey(int examId) => 'visible_subjects_$examId';
-  String subjectDetailKey(int subjectId) => 'subject_detail_$subjectId';
+
+  /// Per-enrollment subject detail (progress differs per userExam even when subjectId is shared).
+  String subjectDetailKey(int userExamId, int subjectId) =>
+      'subject_detail_${userExamId}_$subjectId';
+
+  /// Composite key for exam-scoped topic progress rows.
+  static String topicProgressRowKey(int userExamId, int topicId) =>
+      '$userExamId:$topicId';
   String topicMockInfoKey(int topicId) => 'topic_mock_info_$topicId';
   String mockTestQuestionsKey(int topicId) => 'mock_test_questions_$topicId';
   String mockTestLocalResultKey(String clientId) => 'mock_test_result_$clientId';

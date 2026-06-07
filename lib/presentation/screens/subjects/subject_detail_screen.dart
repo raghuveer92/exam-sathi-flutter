@@ -62,7 +62,13 @@ DateTime _parseBackendTimestamp(String s) {
 // ─── Screen ────────────────────────────────────────────────────────────────
 class SubjectDetailScreen extends StatefulWidget {
   final int subjectId;
-  const SubjectDetailScreen({super.key, required this.subjectId});
+  final int userExamId;
+
+  const SubjectDetailScreen({
+    super.key,
+    required this.subjectId,
+    required this.userExamId,
+  });
 
   @override
   State<SubjectDetailScreen> createState() => _SubjectDetailScreenState();
@@ -134,6 +140,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
   }) async {
     final repo = GetIt.I<ProgressRepository>();
     final updated = await repo.patchTopicInCache(
+      userExamId: widget.userExamId,
       subjectId: widget.subjectId,
       topicId: topic.id,
       actualHours: hours,
@@ -152,6 +159,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     try {
       final detail = await GetIt.I<ProgressRepository>().getSubjectDetail(
         widget.subjectId,
+        userExamId: widget.userExamId,
         forceRemote: false,
       );
       if (!mounted) return;
@@ -188,6 +196,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     _showSuccessDialog(topic.title, hours);
 
     await GetIt.I<ProgressRepository>().persistTopicProgress(
+      userExamId: widget.userExamId,
       subjectId: widget.subjectId,
       topicId: topic.id,
       wasCompleted: topic.isCompleted,
@@ -220,6 +229,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     if (!mounted) return;
 
     await GetIt.I<ProgressRepository>().persistTopicProgress(
+      userExamId: widget.userExamId,
       subjectId: widget.subjectId,
       topicId: topic.id,
       wasCompleted: topic.isCompleted,

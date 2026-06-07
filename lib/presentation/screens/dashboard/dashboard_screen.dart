@@ -914,7 +914,7 @@ class _SubjectRow extends StatelessWidget {
             await repo.setActiveMyExam(exam.id);
           }
           if (!context.mounted) return;
-          context.go('/subjects/${subject.subjectId}');
+          context.go('/subjects/exam/${exam.id}/${subject.subjectId}');
         },
         child: Container(
           padding: const EdgeInsets.all(12),

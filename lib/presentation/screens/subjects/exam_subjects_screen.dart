@@ -78,7 +78,7 @@ class _ExamSubjectsScreenState extends State<ExamSubjectsScreen> {
       await _repo.setActiveMyExam(exam.id);
     }
     if (!mounted) return;
-    await context.push('/subjects/${subject.id}');
+    await context.push('/subjects/exam/${widget.userExamId}/${subject.id}');
     if (!mounted) return;
     await _loadFromLocal();
   }

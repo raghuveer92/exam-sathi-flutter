@@ -35,8 +35,11 @@ class ProgressRepository {
   final ProgressRebuildService _progressRebuildService;
   final _uuid = const Uuid();
 
-  Future<SubjectDetailModel?> getSubjectDetailCached(int subjectId) async {
-    final data = _store.getJson(_store.subjectDetailKey(subjectId));
+  Future<SubjectDetailModel?> getSubjectDetailCached(
+    int subjectId, {
+    required int userExamId,
+  }) async {
+    final data = _store.getJson(_store.subjectDetailKey(userExamId, subjectId));
     if (data == null) return null;
     return SubjectDetailModel.fromJson(data);
   }
@@ -44,12 +47,16 @@ class ProgressRepository {
   /// Local-first read — never hits network during normal usage.
   Future<SubjectDetailModel> getSubjectDetail(
     int subjectId, {
+    required int userExamId,
     bool forceRemote = false,
   }) async {
-    final cached = await getSubjectDetailCached(subjectId);
+    final cached = await getSubjectDetailCached(subjectId, userExamId: userExamId);
     if (!forceRemote) {
       if (cached != null) return cached;
-      final fromCatalog = await _materializeSubjectDetailFromCatalog(subjectId);
+      final fromCatalog = await _materializeSubjectDetailFromCatalog(
+        userExamId: userExamId,
+        subjectId: subjectId,
+      );
       if (fromCatalog != null) return fromCatalog;
       throw StateError(
         'Topics not downloaded yet. Connect to internet and tap SYNC.',
@@ -59,37 +66,51 @@ class ProgressRepository {
       ApiCallTracker.instance.record('GET ${ApiEndpoints.subjectDetail(subjectId)}');
       final response = await _client.dio.get(ApiEndpoints.subjectDetail(subjectId));
       final data = response.data['data'] as Map<String, dynamic>;
-      final localMap = _store.getJson(_store.subjectDetailKey(subjectId));
+      final localMap =
+          _store.getJson(_store.subjectDetailKey(userExamId, subjectId));
       final merged = _mergeSubjectDetailWithLocal(data, localMap);
-      _applyTopicProgressTableToSubjectMap(merged, subjectId);
-      await _store.putJson(_store.subjectDetailKey(subjectId), merged);
+      _applyTopicProgressTableToSubjectMap(merged, userExamId, subjectId);
+      await _store.putJson(
+        _store.subjectDetailKey(userExamId, subjectId),
+        merged,
+      );
       return SubjectDetailModel.fromJson(merged);
     } catch (_) {
       if (cached != null) return cached;
-      final fromCatalog = await _materializeSubjectDetailFromCatalog(subjectId);
+      final fromCatalog = await _materializeSubjectDetailFromCatalog(
+        userExamId: userExamId,
+        subjectId: subjectId,
+      );
       if (fromCatalog != null) return fromCatalog;
       rethrow;
     }
   }
 
   /// Pre-build subject detail caches from synced catalog (chapters + topics).
-  Future<void> materializeSubjectDetailsFromCatalog(Iterable<int> subjectIds) async {
+  Future<void> materializeSubjectDetailsFromCatalog({
+    required int userExamId,
+    required Iterable<int> subjectIds,
+  }) async {
     for (final subjectId in subjectIds) {
-      await _materializeSubjectDetailFromCatalog(subjectId);
+      await _materializeSubjectDetailFromCatalog(
+        userExamId: userExamId,
+        subjectId: subjectId,
+      );
     }
   }
 
   /// Build subject detail from `/sync/catalog` when per-subject API cache is missing.
-  Future<SubjectDetailModel?> _materializeSubjectDetailFromCatalog(
-    int subjectId,
-  ) async {
-    if (_store.getJson(_store.subjectDetailKey(subjectId)) != null) {
-      return getSubjectDetailCached(subjectId);
+  Future<SubjectDetailModel?> _materializeSubjectDetailFromCatalog({
+    required int userExamId,
+    required int subjectId,
+  }) async {
+    if (_store.getJson(_store.subjectDetailKey(userExamId, subjectId)) != null) {
+      return getSubjectDetailCached(subjectId, userExamId: userExamId);
     }
     final data = _buildSubjectDetailMapFromCatalog(subjectId);
     if (data == null) return null;
-    _applyTopicProgressTableToSubjectMap(data, subjectId);
-    await _store.putJson(_store.subjectDetailKey(subjectId), data);
+    _applyTopicProgressTableToSubjectMap(data, userExamId, subjectId);
+    await _store.putJson(_store.subjectDetailKey(userExamId, subjectId), data);
     return SubjectDetailModel.fromJson(data);
   }
 
@@ -168,8 +189,9 @@ class ProgressRepository {
         'orderIndex': (chapter['orderIndex'] as num?) ?? 0,
         'totalTopics': chapterTopics.length,
         'completedTopics': chapterCompleted,
-        'completionPercent':
-            chapterTopics.isEmpty ? 0.0 : (chapterCompleted * 100.0 / chapterTopics.length),
+        'completionPercent': chapterTopics.isEmpty
+            ? 0.0
+            : (chapterCompleted * 100.0 / chapterTopics.length),
         'topics': topicMaps,
       });
     }
@@ -248,15 +270,17 @@ class ProgressRepository {
 
   /// Queue-only write — synced when user taps SYNC.
   Future<void> markTopicComplete({
+    required int userExamId,
     required int topicId,
     required bool isCompleted,
     double actualHours = 0.0,
   }) async {
     await _offlineQueue.enqueue(
       entityType: 'TOPIC',
-      entityId: topicId.toString(),
+      entityId: '$userExamId-$topicId',
       action: isCompleted ? 'COMPLETE_TOPIC' : 'ADD_STUDY_HOURS',
       payload: {
+        'userExamId': userExamId,
         'topicId': topicId,
         'isCompleted': isCompleted,
         'actualHours': actualHours,
@@ -272,9 +296,14 @@ class ProgressRepository {
       return;
     }
     final topicId = (payload['topicId'] as num?)?.toInt();
+    final userExamId = (payload['userExamId'] as num?)?.toInt();
     if (topicId == null) {
       await _offlineQueue.removeByClientId(item['clientId'] as String);
       return;
+    }
+
+    if (userExamId != null) {
+      await _dashboardRepository.setActiveMyExam(userExamId);
     }
 
     try {
@@ -288,7 +317,9 @@ class ProgressRepository {
           if (payload['notes'] != null) 'notes': payload['notes'],
         },
       );
-      await markTopicProgressSynced(topicId);
+      if (userExamId != null) {
+        await markTopicProgressSynced(topicId, userExamId: userExamId);
+      }
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) {
         await _offlineQueue.removeByClientId(item['clientId'] as String);
@@ -347,13 +378,14 @@ class ProgressRepository {
 
   /// Updates cached subject detail immediately (no network).
   Future<SubjectDetailModel?> patchTopicInCache({
+    required int userExamId,
     required int subjectId,
     required int topicId,
     double? actualHours,
     bool? isCompleted,
     String? status,
   }) async {
-    final data = _store.getJson(_store.subjectDetailKey(subjectId));
+    final data = _store.getJson(_store.subjectDetailKey(userExamId, subjectId));
     if (data == null) return null;
 
     final chapters = data['chapters'];
@@ -380,7 +412,7 @@ class ProgressRepository {
     }
 
     _recalculateSubjectStats(data);
-    await _store.putJson(_store.subjectDetailKey(subjectId), data);
+    await _store.putJson(_store.subjectDetailKey(userExamId, subjectId), data);
     return SubjectDetailModel.fromJson(data);
   }
 
@@ -425,9 +457,8 @@ class ProgressRepository {
     data['totalStudyHours'] = totalStudyHours;
   }
 
-  /// Fire-and-forget: patch local cache then queue for SYNC.
-  /// Fire-and-forget wrapper — prefer [persistTopicProgress] when UI must stay in sync.
   void persistTopicProgressInBackground({
+    required int userExamId,
     required int subjectId,
     required int topicId,
     required bool wasCompleted,
@@ -437,6 +468,7 @@ class ProgressRepository {
     String? studyDate,
   }) {
     unawaited(persistTopicProgress(
+      userExamId: userExamId,
       subjectId: subjectId,
       topicId: topicId,
       wasCompleted: wasCompleted,
@@ -448,6 +480,7 @@ class ProgressRepository {
   }
 
   Future<void> persistTopicProgress({
+    required int userExamId,
     required int subjectId,
     required int topicId,
     required bool wasCompleted,
@@ -457,6 +490,7 @@ class ProgressRepository {
     String? studyDate,
   }) =>
       _persistLocally(
+        userExamId: userExamId,
         subjectId: subjectId,
         topicId: topicId,
         wasCompleted: wasCompleted,
@@ -467,6 +501,7 @@ class ProgressRepository {
       );
 
   Future<void> _persistLocally({
+    required int userExamId,
     required int subjectId,
     required int topicId,
     required bool wasCompleted,
@@ -476,6 +511,7 @@ class ProgressRepository {
     String? studyDate,
   }) async {
     final detail = await patchTopicInCache(
+      userExamId: userExamId,
       subjectId: subjectId,
       topicId: topicId,
       actualHours: actualHours,
@@ -484,12 +520,18 @@ class ProgressRepository {
     );
     if (detail == null) return;
 
+    final userExam = await _dashboardRepository.resolveUserExamById(userExamId);
+    final examId = userExam?.examId;
+
     await markTopicComplete(
+      userExamId: userExamId,
       topicId: topicId,
       isCompleted: isCompleted,
       actualHours: actualHours,
     );
     await _writeTopicProgressRecord(
+      userExamId: userExamId,
+      examId: examId,
       topicId: topicId,
       subjectId: subjectId,
       isCompleted: isCompleted,
@@ -518,23 +560,15 @@ class ProgressRepository {
       studyDate: studyDate ?? _localTodayDate(),
     );
 
-    final examId = await _resolveExamIdForSubject(subjectId);
-    if (examId != null) {
-      await _progressRebuildService.rebuildAll();
+    if (userExam != null) {
+      await _progressRebuildService.rebuildExam(
+        userExam.examId,
+        userExamId: userExamId,
+      );
     }
-  }
-
-  Future<int?> _resolveExamIdForSubject(int subjectId) async {
-    final exams = await _dashboardRepository.resolveMyExamsFromCache();
-    for (final exam in exams) {
-      final subjects = _dashboardRepository.resolveVisibleSubjects(exam.examId);
-      if (subjects.any((s) => s.id == subjectId)) return exam.examId;
-    }
-    return null;
   }
 
   /// Persist server study_progress rows into [LocalTables.topicProgress] only.
-  /// Subject-detail caches may not exist yet during bundle sync — apply later.
   Future<int> ingestSyncedTopicProgress(List<dynamic> items) async {
     if (items.isEmpty) return 0;
 
@@ -543,10 +577,17 @@ class ProgressRepository {
       if (raw is! Map<String, dynamic>) continue;
       final topicId = (raw['topicId'] as num?)?.toInt();
       final subjectId = (raw['subjectId'] as num?)?.toInt();
-      if (topicId == null || subjectId == null) continue;
-      if (_hasPendingTopicProgress(topicId)) continue;
+      final examId = (raw['examId'] as num?)?.toInt();
+      if (topicId == null || subjectId == null || examId == null) continue;
+
+      final userExamId =
+          await _dashboardRepository.resolveUserExamIdForExam(examId);
+      if (userExamId == null) continue;
+      if (_hasPendingTopicProgress(topicId, userExamId: userExamId)) continue;
 
       await _writeTopicProgressRecord(
+        userExamId: userExamId,
+        examId: examId,
         topicId: topicId,
         subjectId: subjectId,
         isCompleted: raw['isCompleted'] as bool? ?? false,
@@ -559,46 +600,63 @@ class ProgressRepository {
     return count;
   }
 
-  /// Merge [LocalTables.topicProgress] into all cached subject-detail views.
+  /// Merge [LocalTables.topicProgress] into exam-scoped subject-detail caches.
   Future<int> applyTopicProgressTableToSubjectDetails() async {
     final table = _store.getJson(LocalTables.topicProgress);
     if (table == null || table.isEmpty) return 0;
 
-    final bySubject = <int, List<Map<String, dynamic>>>{};
+    final byEnrollment = <int, List<Map<String, dynamic>>>{};
     for (final entry in table.entries) {
       final row = entry.value;
       if (row is! Map<String, dynamic>) continue;
-      final subjectId = (row['subjectId'] as num?)?.toInt();
-      if (subjectId == null) continue;
-      bySubject.putIfAbsent(subjectId, () => []).add(row);
+      final userExamId = (row['userExamId'] as num?)?.toInt();
+      if (userExamId == null) continue;
+      byEnrollment.putIfAbsent(userExamId, () => []).add(row);
     }
 
     var applied = 0;
-    for (final entry in bySubject.entries) {
-      final data = _store.getJson(_store.subjectDetailKey(entry.key));
-      if (data == null) continue;
-
+    for (final entry in byEnrollment.entries) {
+      final userExamId = entry.key;
+      final bySubject = <int, List<Map<String, dynamic>>>{};
       for (final row in entry.value) {
-        final topicId = (row['topicId'] as num?)?.toInt();
-        if (topicId == null || _hasPendingTopicProgress(topicId)) continue;
-        if (_patchTopicRowInMap(
-          data,
-          topicId: topicId,
-          actualHours: (row['actualHours'] as num?)?.toDouble() ?? 0.0,
-          isCompleted: row['isCompleted'] as bool? ?? false,
-          status: row['status'] as String?,
-        )) {
-          applied++;
-        }
+        final subjectId = (row['subjectId'] as num?)?.toInt();
+        if (subjectId == null) continue;
+        bySubject.putIfAbsent(subjectId, () => []).add(row);
       }
 
-      _recalculateSubjectStats(data);
-      await _store.putJson(_store.subjectDetailKey(entry.key), data);
+      for (final subjectEntry in bySubject.entries) {
+        final subjectId = subjectEntry.key;
+        final data =
+            _store.getJson(_store.subjectDetailKey(userExamId, subjectId));
+        if (data == null) continue;
+
+        for (final row in subjectEntry.value) {
+          final topicId = (row['topicId'] as num?)?.toInt();
+          if (topicId == null ||
+              _hasPendingTopicProgress(topicId, userExamId: userExamId)) {
+            continue;
+          }
+          if (_patchTopicRowInMap(
+            data,
+            topicId: topicId,
+            actualHours: (row['actualHours'] as num?)?.toDouble() ?? 0.0,
+            isCompleted: row['isCompleted'] as bool? ?? false,
+            status: row['status'] as String?,
+          )) {
+            applied++;
+          }
+        }
+
+        _recalculateSubjectStats(data);
+        await _store.putJson(
+          _store.subjectDetailKey(userExamId, subjectId),
+          data,
+        );
+      }
     }
     return applied;
   }
 
-  /// Back-compat: ingest table rows then patch subject-detail caches when present.
   Future<void> applySyncedTopicProgress(List<dynamic> items) async {
     await ingestSyncedTopicProgress(items);
     await applyTopicProgressTableToSubjectDetails();
@@ -606,6 +664,7 @@ class ProgressRepository {
 
   void _applyTopicProgressTableToSubjectMap(
     Map<String, dynamic> data,
+    int userExamId,
     int subjectId,
   ) {
     final table = _store.getJson(LocalTables.topicProgress);
@@ -615,9 +674,13 @@ class ProgressRepository {
     for (final entry in table.entries) {
       final row = entry.value;
       if (row is! Map<String, dynamic>) continue;
+      if ((row['userExamId'] as num?)?.toInt() != userExamId) continue;
       if ((row['subjectId'] as num?)?.toInt() != subjectId) continue;
       final topicId = (row['topicId'] as num?)?.toInt();
-      if (topicId == null || _hasPendingTopicProgress(topicId)) continue;
+      if (topicId == null ||
+          _hasPendingTopicProgress(topicId, userExamId: userExamId)) {
+        continue;
+      }
 
       if (_patchTopicRowInMap(
         data,
@@ -692,12 +755,14 @@ class ProgressRepository {
     }
   }
 
-  bool _hasPendingTopicProgress(int topicId) {
+  bool _hasPendingTopicProgress(int topicId, {required int userExamId}) {
     for (final item in _offlineQueue.pendingItems) {
       final action = item['action'] as String?;
       final payload = item['payload'];
       if (payload is! Map<String, dynamic>) continue;
       if ((payload['topicId'] as num?)?.toInt() != topicId) continue;
+      final queuedUserExamId = (payload['userExamId'] as num?)?.toInt();
+      if (queuedUserExamId != null && queuedUserExamId != userExamId) continue;
       if (action == 'COMPLETE_TOPIC' ||
           action == 'ADD_STUDY_HOURS' ||
           item['type'] == 'TOPIC_PROGRESS') {
@@ -708,6 +773,8 @@ class ProgressRepository {
   }
 
   Future<void> _writeTopicProgressRecord({
+    required int userExamId,
+    required int? examId,
     required int topicId,
     required int subjectId,
     required bool isCompleted,
@@ -718,7 +785,10 @@ class ProgressRepository {
     final table = Map<String, dynamic>.from(
       _store.getJson(LocalTables.topicProgress) ?? {},
     );
-    table['$topicId'] = {
+    final rowKey = LocalStore.topicProgressRowKey(userExamId, topicId);
+    table[rowKey] = {
+      'userExamId': userExamId,
+      if (examId != null) 'examId': examId,
       'topicId': topicId,
       'subjectId': subjectId,
       'isCompleted': isCompleted,
@@ -756,14 +826,18 @@ class ProgressRepository {
     await _store.putJson(LocalTables.dailyStudyLogs, table);
   }
 
-  Future<void> markTopicProgressSynced(int topicId) async {
+  Future<void> markTopicProgressSynced({
+    required int topicId,
+    required int userExamId,
+  }) async {
     final table = Map<String, dynamic>.from(
       _store.getJson(LocalTables.topicProgress) ?? {},
     );
-    final row = table['$topicId'];
+    final rowKey = LocalStore.topicProgressRowKey(userExamId, topicId);
+    final row = table[rowKey];
     if (row is Map<String, dynamic>) {
       row['syncStatus'] = LocalTables.syncStatusSynced;
-      table['$topicId'] = row;
+      table[rowKey] = row;
       await _store.putJson(LocalTables.topicProgress, table);
     }
   }

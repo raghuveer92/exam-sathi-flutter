@@ -201,18 +201,24 @@ class SyncService {
 
     for (final item in pending) {
       if (!_isTopicProgressItem(item)) continue;
-      final topicId = item['payload']?['topicId']?.toString();
+      final payload = item['payload'];
+      if (payload is! Map<String, dynamic>) continue;
+      final topicId = payload['topicId']?.toString();
+      final userExamId = payload['userExamId']?.toString() ?? '';
       final clientId = item['clientId'] as String?;
       if (topicId == null || clientId == null) continue;
-      latestByTopic[topicId] = clientId;
+      latestByTopic['$userExamId:$topicId'] = clientId;
     }
 
     for (final item in pending) {
       if (!_isTopicProgressItem(item)) continue;
-      final topicId = item['payload']?['topicId']?.toString();
+      final payload = item['payload'];
+      if (payload is! Map<String, dynamic>) continue;
+      final topicId = payload['topicId']?.toString();
+      final userExamId = payload['userExamId']?.toString() ?? '';
       final clientId = item['clientId'] as String?;
       if (topicId == null || clientId == null) continue;
-      if (latestByTopic[topicId] != clientId) {
+      if (latestByTopic['$userExamId:$topicId'] != clientId) {
         await _offlineQueue.removeByClientId(clientId);
       }
     }
@@ -328,6 +334,9 @@ class SyncService {
         forceRemote: true,
       );
       stats.subjects += subjects.length;
+      _logger.i(
+        'Exam ${exam.examName} (userExam ${exam.id}): ${subjects.length} subjects',
+      );
       for (final subject in subjects) {
         subjectIndex++;
         _emit(
@@ -340,6 +349,7 @@ class SyncService {
         try {
           final detail = await _progressRepository.getSubjectDetail(
             subject.id,
+            userExamId: exam.id,
             forceRemote: true,
           );
           for (final chapter in detail.chapters) {
@@ -399,8 +409,10 @@ class SyncService {
         forceRemote: false,
       );
       for (final subject in subjects) {
-        final detail =
-            await _progressRepository.getSubjectDetailCached(subject.id);
+        final detail = await _progressRepository.getSubjectDetailCached(
+          subject.id,
+          userExamId: exam.id,
+        );
         if (detail == null) continue;
         for (final chapter in detail.chapters) {
           for (final topic in chapter.topics) {
@@ -509,17 +521,18 @@ class SyncService {
       await _store.putString(LocalStore.syncCatalogAtKey, serverTime);
     }
 
-    final subjectIds = <int>{};
     final exams = await _dashboardRepository.resolveMyExamsFromCache();
     for (final exam in exams) {
       final subjects = await _dashboardRepository.getVisibleSubjectsByExam(
         exam.examId,
         forceRemote: false,
       );
-      subjectIds.addAll(subjects.map((s) => s.id));
-    }
-    if (subjectIds.isNotEmpty) {
-      await _progressRepository.materializeSubjectDetailsFromCatalog(subjectIds);
+      if (subjects.isNotEmpty) {
+        await _progressRepository.materializeSubjectDetailsFromCatalog(
+          userExamId: exam.id,
+          subjectIds: subjects.map((s) => s.id),
+        );
+      }
     }
   }
 

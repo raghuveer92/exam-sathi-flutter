@@ -228,7 +228,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
           await _repo.setActiveMyExam(group.exam.id);
         }
         if (!mounted) return;
-        await context.push('/subjects/${subject.id}');
+        await context.push('/subjects/exam/${group.exam.id}/${subject.id}');
         if (!mounted) return;
         _loadFromLocal();
       },
