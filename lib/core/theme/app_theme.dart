@@ -5,6 +5,24 @@ import '../constants/app_colors.dart';
 class AppTheme {
   AppTheme._();
 
+  /// Dark icons on light backgrounds (Dashboard, Subjects, etc.).
+  static const SystemUiOverlayStyle lightScreenOverlay = SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark,
+    statusBarBrightness: Brightness.light,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarIconBrightness: Brightness.dark,
+  );
+
+  /// Light icons on dark/colored backgrounds (splash, login hero).
+  static const SystemUiOverlayStyle darkScreenOverlay = SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    statusBarBrightness: Brightness.dark,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarIconBrightness: Brightness.light,
+  );
+
   static ThemeData get lightTheme => ThemeData(
         useMaterial3: true,
         fontFamily: 'Poppins',
@@ -24,10 +42,7 @@ class AppTheme {
           scrolledUnderElevation: 0,
           centerTitle: false,
           foregroundColor: AppColors.textPrimary,
-          systemOverlayStyle: SystemUiOverlayStyle(
-            statusBarColor: Colors.transparent,
-            statusBarIconBrightness: Brightness.dark,
-          ),
+          systemOverlayStyle: lightScreenOverlay,
         ),
         cardTheme: CardTheme(
           color: AppColors.cardBg,

@@ -9,6 +9,7 @@ import '../../presentation/screens/auth/login_screen.dart';
 import '../../presentation/screens/auth/register_screen.dart';
 import '../../presentation/screens/dashboard/dashboard_screen.dart';
 import '../../presentation/screens/subjects/subjects_screen.dart';
+import '../../presentation/screens/subjects/exam_subjects_screen.dart';
 import '../../presentation/screens/subjects/subject_detail_screen.dart';
 import '../../presentation/screens/topics/topic_list_screen.dart';
 import '../../presentation/screens/analytics/analytics_screen.dart';
@@ -120,9 +121,8 @@ class AppRouter {
       }
 
       if (authState is AuthUnauthenticated) {
-        if (!loc.startsWith('/login') &&
-            !loc.startsWith('/register') &&
-            !isSplash) {
+        if (isSplash ||
+            (!loc.startsWith('/login') && !loc.startsWith('/register'))) {
           return '/login';
         }
       }
@@ -180,6 +180,13 @@ class AppRouter {
             path: '/subjects',
             builder: (_, __) => const SubjectsScreen(),
             routes: [
+              GoRoute(
+                path: 'exam/:userExamId',
+                builder: (_, state) => ExamSubjectsScreen(
+                  userExamId:
+                      int.parse(state.pathParameters['userExamId']!),
+                ),
+              ),
               GoRoute(
                 path: ':subjectId',
                 builder: (_, state) => SubjectDetailScreen(

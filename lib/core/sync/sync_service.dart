@@ -111,13 +111,21 @@ class SyncService {
     _lastError = null;
     _setStatus(SyncStatus.syncing);
 
+    var uploadOk = true;
     try {
-      await _uploadPending((p) {});
+      uploadOk = await _uploadPending((p) {});
       await _downloadAll(
         onProgress: (_) {},
         incremental: true,
       );
-      _setStatus(SyncStatus.success);
+      await _offlineQueue.discardResolvedActiveExamItems();
+      _offlineQueue.refreshPendingCount();
+      if (!uploadOk) {
+        _lastError = 'Some offline changes could not be uploaded';
+        _setStatus(SyncStatus.failed);
+      } else {
+        _setStatus(SyncStatus.success);
+      }
     } catch (e, st) {
       _lastError = e.toString();
       _logger.w('Manual sync failed', error: e, stackTrace: st);
@@ -129,21 +137,73 @@ class SyncService {
     }
   }
 
-  Future<void> _uploadPending(void Function(SyncProgress) onProgress) async {
+  Future<bool> _uploadPending(void Function(SyncProgress) onProgress) async {
     _emit(SyncStep.uploading, onProgress);
+    var allOk = true;
 
-    for (final item in _offlineQueue.pendingItems) {
-      if (item['action'] == 'SUBMIT_TEST') {
-        try {
+    await _coalesceSupersededTopicProgressItems();
+
+    for (final item in List<Map<String, dynamic>>.from(_offlineQueue.pendingItems)) {
+      final action = item['action'] as String?;
+      final type = item['type'] as String? ?? action;
+      final clientId = item['clientId'] as String?;
+      if (clientId == null) continue;
+
+      try {
+        if (action == 'SUBMIT_TEST') {
           await _mockTestRepository.flushQueuedSubmit(item);
-          await _offlineQueue.removeByClientId(item['clientId'] as String);
-        } catch (e, st) {
-          _logger.w('Submit test flush failed', error: e, stackTrace: st);
+        } else if (action == 'SET_ACTIVE_EXAM') {
+          await _dashboardRepository.flushQueuedActiveExam(item);
+        } else if (action == 'COMPLETE_TOPIC' ||
+            action == 'ADD_STUDY_HOURS' ||
+            type == 'TOPIC_PROGRESS') {
+          await _progressRepository.flushQueuedTopicProgress(item);
+        } else if (action == 'LOG_STUDY_HOURS' || type == 'LOG_STUDY') {
+          await _progressRepository.flushQueuedStudyLog(item);
+        } else {
+          continue;
         }
+        await _offlineQueue.removeByClientId(clientId);
+      } catch (e, st) {
+        allOk = false;
+        _logger.w('Queue item flush failed action=$action', error: e, stackTrace: st);
       }
     }
 
-    await _offlineQueue.flush();
+    final restOk = await _offlineQueue.flush();
+    return allOk && restOk;
+  }
+
+  /// Drop older topic-progress rows when a newer row exists for the same topic.
+  Future<void> _coalesceSupersededTopicProgressItems() async {
+    final pending = _offlineQueue.pendingItems;
+    final latestByTopic = <String, String>{};
+
+    for (final item in pending) {
+      if (!_isTopicProgressItem(item)) continue;
+      final topicId = item['payload']?['topicId']?.toString();
+      final clientId = item['clientId'] as String?;
+      if (topicId == null || clientId == null) continue;
+      latestByTopic[topicId] = clientId;
+    }
+
+    for (final item in pending) {
+      if (!_isTopicProgressItem(item)) continue;
+      final topicId = item['payload']?['topicId']?.toString();
+      final clientId = item['clientId'] as String?;
+      if (topicId == null || clientId == null) continue;
+      if (latestByTopic[topicId] != clientId) {
+        await _offlineQueue.removeByClientId(clientId);
+      }
+    }
+  }
+
+  bool _isTopicProgressItem(Map<String, dynamic> item) {
+    final action = item['action'] as String?;
+    final type = item['type'] as String? ?? action;
+    return action == 'COMPLETE_TOPIC' ||
+        action == 'ADD_STUDY_HOURS' ||
+        type == 'TOPIC_PROGRESS';
   }
 
   Future<void> _downloadAll({
@@ -315,6 +375,19 @@ class SyncService {
     final serverTime = data['serverTime'] as String?;
     if (serverTime != null) {
       await _store.putString(LocalStore.syncCatalogAtKey, serverTime);
+    }
+
+    final subjectIds = <int>{};
+    final exams = await _dashboardRepository.resolveMyExamsFromCache();
+    for (final exam in exams) {
+      final subjects = await _dashboardRepository.getVisibleSubjectsByExam(
+        exam.examId,
+        forceRemote: false,
+      );
+      subjectIds.addAll(subjects.map((s) => s.id));
+    }
+    if (subjectIds.isNotEmpty) {
+      await _progressRepository.materializeSubjectDetailsFromCatalog(subjectIds);
     }
   }
 

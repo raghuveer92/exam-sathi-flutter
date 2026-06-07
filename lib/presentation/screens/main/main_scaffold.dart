@@ -4,8 +4,6 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/responsive_helper.dart';
 
-import '../../widgets/offline_mode_banner.dart';
-
 /// Main scaffold — bottom navigation on mobile/tablet, sidebar on desktop.
 class MainScaffold extends StatelessWidget {
   final Widget child;
@@ -32,38 +30,31 @@ class MainScaffold extends StatelessWidget {
     final currentIndex = _currentIndex(context);
 
     if (ResponsiveHelper.isDesktop(context)) {
-      // ── Desktop: left sidebar ──────────────────────────────────────────
       return Scaffold(
         backgroundColor: AppColors.background,
-        body: Row(
-          children: [
-            _DesktopSidebar(
-              currentIndex: currentIndex,
-              onTap: (i) => context.go(_tabs[i]),
-            ),
-            const VerticalDivider(width: 1, color: AppColors.divider),
-            Expanded(
-              child: Column(
-                children: [
-                  const OfflineModeBanner(),
-                  Expanded(child: child),
-                ],
+        body: SafeArea(
+          child: Row(
+            children: [
+              _DesktopSidebar(
+                currentIndex: currentIndex,
+                onTap: (i) => context.go(_tabs[i]),
               ),
-            ),
-          ],
+              const VerticalDivider(width: 1, color: AppColors.divider),
+              Expanded(child: child),
+            ],
+          ),
         ),
       );
     }
 
-    // ── Mobile / Tablet: bottom navigation (unchanged) ─────────────────
     return Scaffold(
-      body: Column(
-        children: [
-          const OfflineModeBanner(),
-          Expanded(child: child),
-        ],
+      body: SafeArea(
+        bottom: false,
+        child: child,
       ),
-      bottomNavigationBar: BottomNavigationBar(
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: BottomNavigationBar(
         currentIndex: currentIndex,
         onTap: (i) => context.go(_tabs[i]),
         items: const [
@@ -88,6 +79,7 @@ class MainScaffold extends StatelessWidget {
             label: 'Profile',
           ),
         ],
+        ),
       ),
     );
   }

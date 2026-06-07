@@ -72,7 +72,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       await repo.setActiveMyExam(exam.id);
       if (!mounted) return;
       context.read<DashboardBloc>().add(DashboardLoadRequested());
-      context.push('/subjects');
+      context.push('/subjects/exam/${exam.id}');
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

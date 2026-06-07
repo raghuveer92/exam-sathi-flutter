@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
@@ -19,6 +20,8 @@ Object? _semanticsHandle;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(AppTheme.lightScreenOverlay);
   _semanticsHandle ??= WidgetsBinding.instance.ensureSemantics();
 
   // Catch all Flutter framework errors and show them on-screen
@@ -87,6 +90,10 @@ class _ExamSaathiAppState extends State<ExamSaathiApp> {
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme,
           routerConfig: _router,
+          builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+            value: AppTheme.lightScreenOverlay,
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       ),
     );

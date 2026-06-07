@@ -1,5 +1,7 @@
 import 'package:uuid/uuid.dart';
 
+import 'package:flutter/foundation.dart';
+
 import '../local/local_store.dart';
 import '../../data/repositories/sync_repository.dart';
 
@@ -15,6 +17,16 @@ class OfflineQueueService {
   final SyncRepository _syncRepository;
   final _uuid = const Uuid();
 
+  /// Notifies UI (banner, sync badge) when pending count changes.
+  final ValueNotifier<int> pendingCountListenable = ValueNotifier(0);
+
+  void _refreshPendingCount() {
+    pendingCountListenable.value = pendingCount;
+  }
+
+  /// Call after sync completes so banner/badge update even if queue unchanged.
+  void refreshPendingCount() => _refreshPendingCount();
+
   List<Map<String, dynamic>> _readQueue() {
     final list = _store.getJsonList(LocalStore.offlineQueueKey);
     if (list == null) return [];
@@ -23,6 +35,7 @@ class OfflineQueueService {
 
   Future<void> _writeQueue(List<Map<String, dynamic>> items) async {
     await _store.putJson(LocalStore.offlineQueueKey, items);
+    _refreshPendingCount();
   }
 
   /// Enqueue a pending sync item (pending_sync table equivalent in Hive).
@@ -72,44 +85,75 @@ class OfflineQueueService {
 
   List<Map<String, dynamic>> get pendingItems => _readQueue();
 
+  bool _isHandledElsewhere(Map<String, dynamic> item) {
+    final action = item['action'] as String?;
+    final type = item['type'] as String? ?? action;
+    return action == 'SUBMIT_TEST' ||
+        action == 'SET_ACTIVE_EXAM' ||
+        action == 'COMPLETE_TOPIC' ||
+        action == 'ADD_STUDY_HOURS' ||
+        action == 'LOG_STUDY_HOURS' ||
+        type == 'TOPIC_PROGRESS' ||
+        type == 'LOG_STUDY';
+  }
+
+  /// Push remaining queue types (e.g. STUDY_HOURS) one item at a time.
   Future<bool> flush({bool force = false}) async {
     final queue = _readQueue();
     if (queue.isEmpty) return true;
 
-    final pushItems = queue
-        .where((e) =>
-            e['action'] != 'SUBMIT_TEST' && e['syncStatus'] != 'synced')
-        .map((e) => {
-              'clientId': e['clientId'],
-              'type': e['type'] ?? e['action'],
-              'payload': e['payload'],
-              'createdAt': e['createdAt'],
-            })
-        .toList();
-
-    if (pushItems.isNotEmpty) {
-      try {
-        await _syncRepository.pushChanges(pushItems);
-      } catch (_) {
-        if (!force) rethrow;
-        return false;
-      }
-    }
-
     final remaining = <Map<String, dynamic>>[];
+    var anyFailed = false;
+
     for (final item in queue) {
-      if (item['action'] == 'SUBMIT_TEST') {
+      if (_isHandledElsewhere(item)) {
         remaining.add(item);
+        continue;
+      }
+      if (item['syncStatus'] == 'synced') continue;
+
+      final pushItem = {
+        'clientId': item['clientId'],
+        'type': item['type'] ?? item['action'],
+        'payload': item['payload'],
+        'createdAt': item['createdAt'],
+      };
+
+      try {
+        await _syncRepository.pushChanges([pushItem]);
+      } catch (_) {
+        anyFailed = true;
+        remaining.add(item);
+        if (!force) continue;
       }
     }
+
     await _writeQueue(remaining);
-    return true;
+    return !anyFailed;
   }
 
   Future<void> removeByClientId(String clientId) async {
     final queue = _readQueue()
       ..removeWhere((e) => e['clientId'] == clientId);
     await _writeQueue(queue);
+  }
+
+  /// Drop active-exam queue rows already reflected in cached profile.
+  Future<void> discardResolvedActiveExamItems() async {
+    final profile = _store.getJson(LocalStore.userProfileKey);
+    final activeId = (profile?['activeUserExamId'] as num?)?.toInt();
+    if (activeId == null) return;
+
+    final queue = _readQueue();
+    final before = queue.length;
+    queue.removeWhere((e) {
+      if (e['action'] != 'SET_ACTIVE_EXAM') return false;
+      final queuedId = (e['payload']?['userExamId'] as num?)?.toInt();
+      return queuedId == activeId;
+    });
+    if (queue.length != before) {
+      await _writeQueue(queue);
+    }
   }
 
   Future<void> markSynced(String clientId) async {

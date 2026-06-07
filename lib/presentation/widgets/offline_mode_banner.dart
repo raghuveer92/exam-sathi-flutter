@@ -9,29 +9,35 @@ class OfflineModeBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final pending = GetIt.I<OfflineQueueService>().pendingCount;
-    if (pending == 0) return const SizedBox.shrink();
+    final queue = GetIt.I<OfflineQueueService>();
+    return ValueListenableBuilder<int>(
+      valueListenable: queue.pendingCountListenable,
+      builder: (context, pending, _) {
+        if (pending == 0) return const SizedBox.shrink();
 
-    return Material(
-      color: const Color(0xFF37474F),
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              const Icon(Icons.cloud_upload_outlined, color: Colors.white, size: 18),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  '$pending change${pending == 1 ? '' : 's'} waiting to sync — tap SYNC when online',
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                ),
+        return Material(
+          color: const Color(0xFF37474F),
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.cloud_upload_outlined,
+                      color: Colors.white, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '$pending change${pending == 1 ? '' : 's'} waiting to sync — tap SYNC when online',
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

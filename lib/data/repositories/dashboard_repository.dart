@@ -9,6 +9,8 @@ import '../../core/local/api_call_tracker.dart';
 import '../../core/local/local_store.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
+import '../../core/network/connectivity_helper.dart';
+import '../../core/sync/offline_queue_service.dart';
 
 /// Formats a DateTime to YYYY-MM-DD using local year/month/day fields.
 String _fmtLocalDate(DateTime d) =>
@@ -32,12 +34,15 @@ class ExamSubjectsCacheGroup {
 class DashboardRepository {
   final ApiClient _client;
   final LocalStore _store;
+  final OfflineQueueService _offlineQueue;
 
   DashboardRepository({
     required ApiClient client,
     required LocalStore store,
+    required OfflineQueueService offlineQueue,
   })  : _client = client,
-        _store = store;
+        _store = store,
+        _offlineQueue = offlineQueue;
 
   // ── Cache-first reads ─────────────────────────────────────────────────────
 
@@ -113,26 +118,8 @@ class DashboardRepository {
     final groups = <ExamSubjectsCacheGroup>[];
 
     for (final exam in exams) {
-      var progressRows =
-          getSubjectProgressCached(exam.examId) ?? const <SubjectProgressModel>[];
-      if (progressRows.isEmpty &&
-          dashboard != null &&
-          exam.isActive &&
-          dashboard.subjectProgress.isNotEmpty) {
-        progressRows = dashboard.subjectProgress;
-      }
-
-      var subjects = resolveVisibleSubjects(exam.examId);
-      if (subjects.isEmpty && progressRows.isNotEmpty) {
-        subjects = progressRows.map((p) => p.toSubjectModel(exam.examId)).toList();
-      }
-      if (subjects.isEmpty && progressRows.isEmpty) continue;
-
-      groups.add(ExamSubjectsCacheGroup(
-        exam: exam,
-        subjects: subjects,
-        progressRows: progressRows,
-      ));
+      final group = _buildSubjectGroupForExam(exam, dashboard);
+      if (group != null) groups.add(group);
     }
 
     groups.sort((a, b) {
@@ -141,6 +128,49 @@ class DashboardRepository {
       return ad.compareTo(bd);
     });
     return groups;
+  }
+
+  /// Subjects + progress for one enrolled exam (local cache only).
+  Future<ExamSubjectsCacheGroup?> buildSubjectGroupForUserExam(
+    int userExamId,
+  ) async {
+    final exams = await resolveMyExamsFromCache();
+    UserExamModel? exam;
+    for (final e in exams) {
+      if (e.id == userExamId) {
+        exam = e;
+        break;
+      }
+    }
+    if (exam == null) return null;
+    final dashboard = await getDashboardCached();
+    return _buildSubjectGroupForExam(exam, dashboard);
+  }
+
+  ExamSubjectsCacheGroup? _buildSubjectGroupForExam(
+    UserExamModel exam,
+    DashboardModel? dashboard,
+  ) {
+    var progressRows =
+        getSubjectProgressCached(exam.examId) ?? const <SubjectProgressModel>[];
+    if (progressRows.isEmpty &&
+        dashboard != null &&
+        exam.isActive &&
+        dashboard.subjectProgress.isNotEmpty) {
+      progressRows = dashboard.subjectProgress;
+    }
+
+    var subjects = resolveVisibleSubjects(exam.examId);
+    if (subjects.isEmpty && progressRows.isNotEmpty) {
+      subjects = progressRows.map((p) => p.toSubjectModel(exam.examId)).toList();
+    }
+    if (subjects.isEmpty && progressRows.isEmpty) return null;
+
+    return ExamSubjectsCacheGroup(
+      exam: exam,
+      subjects: subjects,
+      progressRows: progressRows,
+    );
   }
 
   /// Local-first read — never hits network during normal usage.
@@ -276,10 +306,136 @@ class DashboardRepository {
     return UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
   }
 
+  /// Local-first: patch cache immediately; sync PATCH when online / on SYNC.
   Future<UserModel> setActiveMyExam(int userExamId) async {
+    final user = await _patchActiveExamLocally(userExamId);
+
+    if (await isDeviceOnline()) {
+      try {
+        return await _setActiveMyExamRemote(userExamId);
+      } catch (_) {
+        await _queueActiveExamChange(userExamId);
+        return user;
+      }
+    }
+
+    await _queueActiveExamChange(userExamId);
+    return user;
+  }
+
+  Future<UserModel> _setActiveMyExamRemote(int userExamId) async {
     ApiCallTracker.instance.record('PATCH active exam');
-    final response = await _client.dio.patch(ApiEndpoints.setActiveMyExam(userExamId));
-    return UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
+    final response =
+        await _client.dio.patch(ApiEndpoints.setActiveMyExam(userExamId));
+    final remote =
+        UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
+    await _applyUserToCache(remote);
+    await _removeQueuedActiveExamChanges();
+    return remote;
+  }
+
+  Future<void> flushQueuedActiveExam(Map<String, dynamic> item) async {
+    final userExamId = item['payload']?['userExamId'];
+    if (userExamId == null) {
+      await _removeQueuedActiveExamChanges();
+      return;
+    }
+    try {
+      await _setActiveMyExamRemote((userExamId as num).toInt());
+    } catch (_) {
+      final profile = _store.getJson(LocalStore.userProfileKey);
+      final activeId = (profile?['activeUserExamId'] as num?)?.toInt();
+      if (activeId == (userExamId as num).toInt()) {
+        await _removeQueuedActiveExamChanges();
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  Future<UserModel> _patchActiveExamLocally(int userExamId) async {
+    final exams = await resolveMyExamsFromCache();
+    UserExamModel? target;
+    final updatedExams = exams.map((exam) {
+      final active = exam.id == userExamId;
+      if (active) target = exam;
+      return UserExamModel(
+        id: exam.id,
+        examId: exam.examId,
+        examName: exam.examName,
+        examDate: exam.examDate,
+        daysLeft: exam.daysLeft,
+        totalSubjects: exam.totalSubjects,
+        progressPercent: exam.progressPercent,
+        isActive: active,
+      );
+    }).toList();
+
+    if (target == null) {
+      throw StateError('Exam not found offline. Tap SYNC while online.');
+    }
+    final activeExam = target!;
+
+    await _store.putJson(
+      LocalStore.myExamsKey,
+      updatedExams.map((e) => e.toJson()).toList(),
+    );
+
+    final profile = Map<String, dynamic>.from(
+      _store.getJson(LocalStore.userProfileKey) ??
+          (await getDashboardCached())?.user.toJson() ??
+          {},
+    );
+    profile['selectedExamId'] = activeExam.examId;
+    profile['selectedExamName'] = activeExam.examName;
+    profile['activeUserExamId'] = userExamId;
+    profile['examDate'] = activeExam.examDate;
+    profile['userExams'] = updatedExams.map((e) => e.toJson()).toList();
+
+    final dashData = _store.getJson(LocalStore.dashboardKey);
+    if (dashData != null) {
+      final dash = Map<String, dynamic>.from(dashData);
+      dash['user'] = Map<String, dynamic>.from(profile);
+      dash['myExams'] = updatedExams.map((e) => e.toJson()).toList();
+      await _store.putJson(LocalStore.dashboardKey, dash);
+    }
+
+    await _store.putJson(LocalStore.userProfileKey, profile);
+    return UserModel.fromJson(profile);
+  }
+
+  Future<void> _applyUserToCache(UserModel user) async {
+    await _store.putJson(LocalStore.userProfileKey, user.toJson());
+    final dashData = _store.getJson(LocalStore.dashboardKey);
+    if (dashData != null) {
+      final dash = Map<String, dynamic>.from(dashData);
+      dash['user'] = user.toJson();
+      if (user.userExams.isNotEmpty) {
+        dash['myExams'] = user.userExams.map((e) => e.toJson()).toList();
+        await _store.putJson(
+          LocalStore.myExamsKey,
+          user.userExams.map((e) => e.toJson()).toList(),
+        );
+      }
+      await _store.putJson(LocalStore.dashboardKey, dash);
+    }
+  }
+
+  Future<void> _queueActiveExamChange(int userExamId) async {
+    await _removeQueuedActiveExamChanges();
+    await _offlineQueue.enqueue(
+      entityType: 'USER_EXAM',
+      entityId: userExamId.toString(),
+      action: 'SET_ACTIVE_EXAM',
+      payload: {'userExamId': userExamId},
+    );
+  }
+
+  Future<void> _removeQueuedActiveExamChanges() async {
+    final queue = _offlineQueue.pendingItems
+        .where((e) => e['action'] != 'SET_ACTIVE_EXAM')
+        .toList();
+    await _store.putJson(LocalStore.offlineQueueKey, queue);
   }
 
   Future<UserModel> deleteMyExam(int userExamId) async {

@@ -28,6 +28,7 @@ class _SyncRefreshButtonState extends State<SyncRefreshButton> {
     try {
       await GetIt.I<SyncService>().manualSync();
       await widget.onRefreshed();
+      GetIt.I<OfflineQueueService>().refreshPendingCount();
       if (mounted) {
         final pending = GetIt.I<OfflineQueueService>().pendingCount;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -47,21 +48,26 @@ class _SyncRefreshButtonState extends State<SyncRefreshButton> {
 
   @override
   Widget build(BuildContext context) {
-    final pending = GetIt.I<OfflineQueueService>().pendingCount;
-    return IconButton(
-      tooltip: widget.tooltip,
-      onPressed: _busy ? null : _run,
-      icon: _busy
-          ? const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : Badge(
-              isLabelVisible: pending > 0,
-              label: Text('$pending'),
-              child: const Icon(Icons.sync),
-            ),
+    final queue = GetIt.I<OfflineQueueService>();
+    return ValueListenableBuilder<int>(
+      valueListenable: queue.pendingCountListenable,
+      builder: (context, pending, _) {
+        return IconButton(
+          tooltip: widget.tooltip,
+          onPressed: _busy ? null : _run,
+          icon: _busy
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Badge(
+                  isLabelVisible: pending > 0,
+                  label: Text('$pending'),
+                  child: const Icon(Icons.sync),
+                ),
+        );
+      },
     );
   }
 }
