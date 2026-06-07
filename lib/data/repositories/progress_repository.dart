@@ -9,6 +9,7 @@ import '../../core/local/local_store.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
 import '../../core/sync/offline_queue_service.dart';
+import 'dashboard_repository.dart';
 
 /// All reads from local cache. All writes to cache + pending sync queue.
 class ProgressRepository {
@@ -16,13 +17,16 @@ class ProgressRepository {
     required ApiClient client,
     required LocalStore store,
     required OfflineQueueService offlineQueue,
+    required DashboardRepository dashboardRepository,
   })  : _client = client,
         _store = store,
-        _offlineQueue = offlineQueue;
+        _offlineQueue = offlineQueue,
+        _dashboardRepository = dashboardRepository;
 
   final ApiClient _client;
   final LocalStore _store;
   final OfflineQueueService _offlineQueue;
+  final DashboardRepository _dashboardRepository;
 
   Future<SubjectDetailModel?> getSubjectDetailCached(int subjectId) async {
     final data = _store.getJson(_store.subjectDetailKey(subjectId));
@@ -349,17 +353,20 @@ class ProgressRepository {
   }
 
   /// Fire-and-forget: patch local cache then queue for SYNC.
+  /// Fire-and-forget wrapper — prefer [persistTopicProgress] when UI must stay in sync.
   void persistTopicProgressInBackground({
     required int subjectId,
     required int topicId,
+    required bool wasCompleted,
     required bool isCompleted,
     required double actualHours,
     double? studyHoursDelta,
     String? studyDate,
   }) {
-    unawaited(_persistLocally(
+    unawaited(persistTopicProgress(
       subjectId: subjectId,
       topicId: topicId,
+      wasCompleted: wasCompleted,
       isCompleted: isCompleted,
       actualHours: actualHours,
       studyHoursDelta: studyHoursDelta,
@@ -367,32 +374,69 @@ class ProgressRepository {
     ));
   }
 
+  Future<void> persistTopicProgress({
+    required int subjectId,
+    required int topicId,
+    required bool wasCompleted,
+    required bool isCompleted,
+    required double actualHours,
+    double? studyHoursDelta,
+    String? studyDate,
+  }) =>
+      _persistLocally(
+        subjectId: subjectId,
+        topicId: topicId,
+        wasCompleted: wasCompleted,
+        isCompleted: isCompleted,
+        actualHours: actualHours,
+        studyHoursDelta: studyHoursDelta,
+        studyDate: studyDate,
+      );
+
   Future<void> _persistLocally({
     required int subjectId,
     required int topicId,
+    required bool wasCompleted,
     required bool isCompleted,
     required double actualHours,
     double? studyHoursDelta,
     String? studyDate,
   }) async {
-    await patchTopicInCache(
+    final detail = await patchTopicInCache(
       subjectId: subjectId,
       topicId: topicId,
       actualHours: actualHours,
       isCompleted: isCompleted,
       status: isCompleted ? 'COMPLETED' : (actualHours > 0 ? 'IN_PROGRESS' : null),
     );
+    if (detail == null) return;
+
     await markTopicComplete(
       topicId: topicId,
       isCompleted: isCompleted,
       actualHours: actualHours,
     );
-    if (studyHoursDelta != null && studyHoursDelta > 0 && studyDate != null) {
+    if (studyHoursDelta != null && studyHoursDelta != 0 && studyDate != null) {
       await logStudyHours(
         studyDate: studyDate,
         hoursStudied: studyHoursDelta,
       );
     }
+
+    await _dashboardRepository.applyLocalProgressUpdate(
+      subjectDetail: detail,
+      wasCompleted: wasCompleted,
+      isCompleted: isCompleted,
+      studyHoursDelta: studyHoursDelta ?? 0,
+      studyDate: studyDate ?? _localTodayDate(),
+    );
+  }
+
+  String _localTodayDate() {
+    final now = DateTime.now();
+    return '${now.year.toString().padLeft(4, '0')}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
   }
 
   Future<List<TopicModel>> getTopicsByChapter(int chapterId) async {

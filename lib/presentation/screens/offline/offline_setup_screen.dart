@@ -6,6 +6,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/local/local_store.dart';
 import '../../../core/sync/sync_progress.dart';
 import '../../../core/sync/sync_service.dart';
+import '../../../data/repositories/dashboard_repository.dart';
 
 /// Shown after first login — downloads all data before normal usage.
 class OfflineSetupScreen extends StatefulWidget {
@@ -36,6 +37,7 @@ class _OfflineSetupScreenState extends State<OfflineSetupScreen> {
           if (mounted) setState(() => _progress = p);
         },
       );
+      await GetIt.I<DashboardRepository>().syncDailyTargetFromProfile();
       await GetIt.I<LocalStore>().markInitialDownloadComplete();
       if (!mounted) return;
       context.go('/home');

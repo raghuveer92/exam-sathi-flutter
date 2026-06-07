@@ -4,6 +4,7 @@ import 'package:logger/logger.dart';
 
 import '../local/local_store.dart';
 import '../network/connectivity_helper.dart';
+import '../../data/repositories/auth_repository.dart';
 import '../../data/repositories/dashboard_repository.dart';
 import '../../data/repositories/mock_test_repository.dart';
 import '../../data/repositories/progress_repository.dart';
@@ -19,6 +20,7 @@ class SyncService {
     required LocalStore store,
     required SyncRepository syncRepository,
     required OfflineQueueService offlineQueue,
+    required AuthRepository authRepository,
     required DashboardRepository dashboardRepository,
     required ProgressRepository progressRepository,
     required MockTestRepository mockTestRepository,
@@ -26,6 +28,7 @@ class SyncService {
   })  : _store = store,
         _syncRepository = syncRepository,
         _offlineQueue = offlineQueue,
+        _authRepository = authRepository,
         _dashboardRepository = dashboardRepository,
         _progressRepository = progressRepository,
         _mockTestRepository = mockTestRepository,
@@ -34,6 +37,7 @@ class SyncService {
   final LocalStore _store;
   final SyncRepository _syncRepository;
   final OfflineQueueService _offlineQueue;
+  final AuthRepository _authRepository;
   final DashboardRepository _dashboardRepository;
   final ProgressRepository _progressRepository;
   final MockTestRepository _mockTestRepository;
@@ -160,6 +164,12 @@ class SyncService {
           await _progressRepository.flushQueuedTopicProgress(item);
         } else if (action == 'LOG_STUDY_HOURS' || type == 'LOG_STUDY') {
           await _progressRepository.flushQueuedStudyLog(item);
+        } else if (action == 'STUDY_HOURS') {
+          final hours =
+              (item['payload']?['dailyTargetHours'] as num?)?.toDouble();
+          if (hours != null) {
+            await _dashboardRepository.updateStudyHours(hours);
+          }
         } else {
           continue;
         }
@@ -213,6 +223,11 @@ class SyncService {
     _emit(SyncStep.preparing, onProgress);
 
     _emit(SyncStep.userData, onProgress);
+    try {
+      await _authRepository.getMe();
+    } catch (e, st) {
+      _logger.w('Profile refresh skipped before sync', error: e, stackTrace: st);
+    }
     try {
       await syncBundle(incremental: incremental);
     } catch (e, st) {
@@ -335,19 +350,38 @@ class SyncService {
     final data = await _syncRepository.syncBundle(since: since);
 
     final dashboard = data['dashboard'];
+    final myExams = data['myExams'];
+    final profileUser = _store.getJson(LocalStore.userProfileKey);
+
     if (dashboard is Map<String, dynamic>) {
-      await _store.putJson(LocalStore.dashboardKey, dashboard);
-      _dashboardRepository.cacheEmbeddedDashboardProgress(dashboard);
-      final user = dashboard['user'];
-      if (user != null) {
-        await _store.putJson(LocalStore.userProfileKey, user);
-      }
+      await _dashboardRepository.storeSyncedDashboard(
+        dashboard,
+        bundleMyExams: myExams as List<dynamic>?,
+        profileUser: profileUser,
+      );
+    } else if (myExams is List && myExams.isNotEmpty) {
+      final existing = _store.getJson(LocalStore.dashboardKey);
+      final base = existing ?? <String, dynamic>{
+        'user': profileUser ?? {},
+        'subjectProgress': [],
+        'weeklyLogs': [],
+      };
+      await _dashboardRepository.storeSyncedDashboard(
+        Map<String, dynamic>.from(base),
+        bundleMyExams: myExams,
+        profileUser: profileUser,
+      );
     }
 
-    final myExams = data['myExams'];
     if (myExams is List) {
       await _store.putJson(LocalStore.myExamsKey, myExams);
     }
+
+    try {
+      await _authRepository.getMe();
+    } catch (_) {}
+
+    await _dashboardRepository.syncDailyTargetFromProfile();
 
     final progressMap = data['subjectProgressByExamId'];
     if (progressMap is Map) {

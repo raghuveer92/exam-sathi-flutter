@@ -93,8 +93,10 @@ class OfflineQueueService {
         action == 'COMPLETE_TOPIC' ||
         action == 'ADD_STUDY_HOURS' ||
         action == 'LOG_STUDY_HOURS' ||
+        action == 'STUDY_HOURS' ||
         type == 'TOPIC_PROGRESS' ||
-        type == 'LOG_STUDY';
+        type == 'LOG_STUDY' ||
+        type == 'STUDY_HOURS';
   }
 
   /// Push remaining queue types (e.g. STUDY_HOURS) one item at a time.

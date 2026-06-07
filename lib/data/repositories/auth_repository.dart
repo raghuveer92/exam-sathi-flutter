@@ -57,14 +57,14 @@ class AuthRepository {
     return user;
   }
 
+  Future<void> cacheUser(UserModel user) async {
+    await _store.putJson(LocalStore.userProfileKey, user.toJson());
+  }
+
   Future<UserModel?> getCachedUser() async {
     final data = _store.getJson(LocalStore.userProfileKey);
     if (data == null) return null;
     return UserModel.fromJson(data);
-  }
-
-  Future<void> cacheUser(UserModel user) async {
-    await _store.putJson(LocalStore.userProfileKey, user.toJson());
   }
 
   Future<void> logout() async {

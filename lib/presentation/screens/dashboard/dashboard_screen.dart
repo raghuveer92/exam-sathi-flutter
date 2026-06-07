@@ -49,9 +49,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     AnalyticsService.logDashboardViewed();
-    final state = context.read<DashboardBloc>().state;
-    if (state is DashboardInitial) {
-      context.read<DashboardBloc>().add(DashboardLoadRequested());
+    final bloc = context.read<DashboardBloc>();
+    if (bloc.state is DashboardInitial) {
+      bloc.add(DashboardLoadRequested());
+    } else {
+      bloc.add(DashboardRefreshRequested());
     }
   }
 

@@ -88,8 +88,30 @@ class DashboardModel extends Equatable {
         todayTopicsCompleted: todayTopicsCompleted,
         estimatedDaysToComplete: estimatedDaysToComplete,
         subjectProgress: subjectProgress,
+        myExams: myExams,
         weeklyLogs: weeklyLogs,
       );
+
+  /// User-level target, falling back to enrolled exams when needed.
+  double get effectiveDailyTargetHours {
+    final fromUser = user.dailyTargetHours;
+    if (fromUser != null && fromUser > 0) return fromUser;
+
+    for (final source in [myExams, user.userExams]) {
+      for (final exam in source) {
+        if (exam.isActive &&
+            exam.dailyTargetHours != null &&
+            exam.dailyTargetHours! > 0) {
+          return exam.dailyTargetHours!;
+        }
+      }
+      for (final exam in source) {
+        final hours = exam.dailyTargetHours;
+        if (hours != null && hours > 0) return hours;
+      }
+    }
+    return 0.0;
+  }
 }
 
 class DailyLogModel extends Equatable {

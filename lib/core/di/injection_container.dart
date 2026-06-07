@@ -72,12 +72,14 @@ Future<void> setupDependencies() async {
         client: sl<ApiClient>(),
         store: sl<LocalStore>(),
         offlineQueue: sl<OfflineQueueService>(),
+        dashboardRepository: sl<DashboardRepository>(),
       ));
 
   sl.registerLazySingleton<SyncService>(() => SyncService(
         store: sl<LocalStore>(),
         syncRepository: sl<SyncRepository>(),
         offlineQueue: sl<OfflineQueueService>(),
+        authRepository: sl<AuthRepository>(),
         dashboardRepository: sl<DashboardRepository>(),
         progressRepository: sl<ProgressRepository>(),
         mockTestRepository: sl<MockTestRepository>(),

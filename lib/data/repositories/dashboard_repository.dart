@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import '../models/dashboard_model.dart';
+import '../models/subject_detail_model.dart';
 import '../models/exam_subject_group_model.dart';
 import '../models/exam_model.dart';
 import '../models/subject_model.dart';
@@ -49,7 +52,439 @@ class DashboardRepository {
   Future<DashboardModel?> getDashboardCached() async {
     final data = _store.getJson(LocalStore.dashboardKey);
     if (data == null) return null;
-    return DashboardModel.fromJson(data);
+    final hydrated = _hydrateDashboardMap(data);
+    if (hydrated != data) {
+      await _store.putJson(LocalStore.dashboardKey, hydrated);
+    }
+    return DashboardModel.fromJson(hydrated);
+  }
+
+  /// Reconcile daily target + myExams from profile and sync bundle caches.
+  Map<String, dynamic> _hydrateDashboardMap(Map<String, dynamic> data) {
+    return _mergeDailyTargetIntoDashboard(
+      data,
+      bundleMyExams: _store.getJsonList(LocalStore.myExamsKey),
+      profileUser: _store.getJson(LocalStore.userProfileKey),
+    );
+  }
+
+  /// Patch dashboard user daily target from cached profile after login/sync.
+  Future<void> syncDailyTargetFromProfile() async {
+    final dash = _store.getJson(LocalStore.dashboardKey);
+    if (dash == null) return;
+    final merged = _mergeDailyTargetIntoDashboard(
+      dash,
+      bundleMyExams: _store.getJsonList(LocalStore.myExamsKey),
+      profileUser: _store.getJson(LocalStore.userProfileKey),
+    );
+    await _store.putJson(LocalStore.dashboardKey, merged);
+    final user = merged['user'];
+    if (user != null) {
+      await _store.putJson(LocalStore.userProfileKey, user);
+    }
+  }
+
+  /// Persist server dashboard without wiping a known local daily target.
+  Future<void> storeSyncedDashboard(
+    Map<String, dynamic> remote, {
+    List<dynamic>? bundleMyExams,
+    Map<String, dynamic>? profileUser,
+  }) async {
+    final merged = _mergeDailyTargetIntoDashboard(
+      remote,
+      bundleMyExams: bundleMyExams ?? _store.getJsonList(LocalStore.myExamsKey),
+      profileUser: profileUser ?? _store.getJson(LocalStore.userProfileKey),
+    );
+    await _store.putJson(LocalStore.dashboardKey, merged);
+    cacheEmbeddedDashboardProgress(merged);
+    final user = merged['user'];
+    if (user != null) {
+      await _store.putJson(LocalStore.userProfileKey, user);
+    }
+  }
+
+  Map<String, dynamic> _mergeDailyTargetIntoDashboard(
+    Map<String, dynamic> remote, {
+    List<dynamic>? bundleMyExams,
+    Map<String, dynamic>? profileUser,
+  }) {
+    final merged = Map<String, dynamic>.from(remote);
+    final local = _store.getJson(LocalStore.dashboardKey);
+    final remoteUser = merged['user'];
+    if (remoteUser is! Map<String, dynamic>) return merged;
+
+    final user = Map<String, dynamic>.from(remoteUser);
+    final remoteDaily = (user['dailyTargetHours'] as num?)?.toDouble();
+    final localUser = local?['user'];
+    final localDaily = localUser is Map<String, dynamic>
+        ? (localUser['dailyTargetHours'] as num?)?.toDouble()
+        : null;
+    final profileDaily = profileUser is Map<String, dynamic>
+        ? (profileUser['dailyTargetHours'] as num?)?.toDouble()
+        : null;
+
+    final examMaps = _collectExamMaps(
+      dashboard: merged,
+      bundleMyExams: bundleMyExams,
+      profileUser: profileUser,
+    );
+    if (examMaps.isNotEmpty) {
+      merged['myExams'] = examMaps;
+    }
+
+    double? resolvedDaily;
+    if (remoteDaily != null && remoteDaily > 0) {
+      resolvedDaily = remoteDaily;
+    } else if (profileDaily != null && profileDaily > 0) {
+      resolvedDaily = profileDaily;
+    } else if (localDaily != null && localDaily > 0) {
+      resolvedDaily = localDaily;
+    } else {
+      resolvedDaily = _dailyTargetFromMyExams(
+        examMaps,
+        (user['activeUserExamId'] as num?)?.toInt(),
+      );
+    }
+
+    if (resolvedDaily != null && resolvedDaily > 0) {
+      user['dailyTargetHours'] = resolvedDaily;
+      user['weeklyTargetHours'] =
+          (user['weeklyTargetHours'] as num?)?.toDouble() ??
+              (profileUser?['weeklyTargetHours'] as num?)?.toDouble() ??
+              (resolvedDaily * 7 * 10).round() / 10.0;
+    }
+
+    if (examMaps.isNotEmpty) {
+      user['userExams'] = _enrichUserExamsFromExamMaps(
+        user['userExams'] as List<dynamic>?,
+        examMaps,
+      );
+    }
+
+    merged['user'] = user;
+    return merged;
+  }
+
+  List<Map<String, dynamic>> _enrichUserExamsFromExamMaps(
+    List<dynamic>? userExams,
+    List<Map<String, dynamic>> examMaps,
+  ) {
+    final byId = {
+      for (final exam in examMaps)
+        if ((exam['id'] as num?)?.toInt() case final id?) id: exam,
+    };
+
+    if (userExams == null || userExams.isEmpty) {
+      return examMaps.map((e) => Map<String, dynamic>.from(e)).toList();
+    }
+
+    final enriched = <Map<String, dynamic>>[];
+    for (final raw in userExams) {
+      if (raw is! Map<String, dynamic>) continue;
+      final copy = Map<String, dynamic>.from(raw);
+      final id = (copy['id'] as num?)?.toInt();
+      final source = id != null ? byId[id] : null;
+      if (source != null) {
+        for (final key in [
+          'dailyTargetHours',
+          'weeklyTargetHours',
+          'isActive',
+          'examDate',
+        ]) {
+          final value = source[key];
+          if (value != null) copy[key] = value;
+        }
+      }
+      enriched.add(copy);
+    }
+    return enriched;
+  }
+
+  List<Map<String, dynamic>> _collectExamMaps({
+    Map<String, dynamic>? dashboard,
+    List<dynamic>? bundleMyExams,
+    Map<String, dynamic>? profileUser,
+  }) {
+    final byId = <int, Map<String, dynamic>>{};
+
+    void addAll(List<dynamic>? list) {
+      if (list == null) return;
+      for (final raw in list) {
+        if (raw is! Map<String, dynamic>) continue;
+        final id = (raw['id'] as num?)?.toInt();
+        if (id == null) continue;
+        final existing = byId[id];
+        if (existing == null) {
+          byId[id] = Map<String, dynamic>.from(raw);
+          continue;
+        }
+        final merged = Map<String, dynamic>.from(existing);
+        for (final entry in raw.entries) {
+          final value = entry.value;
+          if (value == null) continue;
+          if (entry.key == 'dailyTargetHours' ||
+              entry.key == 'weeklyTargetHours' ||
+              entry.key == 'isActive' ||
+              entry.key == 'examDate') {
+            merged[entry.key] = value;
+          } else if (!merged.containsKey(entry.key) || merged[entry.key] == null) {
+            merged[entry.key] = value;
+          }
+        }
+        byId[id] = merged;
+      }
+    }
+
+    final dashUser = dashboard?['user'];
+    if (dashUser is Map<String, dynamic>) {
+      addAll(dashUser['userExams'] as List<dynamic>?);
+    }
+    if (profileUser != null) {
+      addAll(profileUser['userExams'] as List<dynamic>?);
+    }
+    addAll(dashboard?['myExams'] as List<dynamic>?);
+    addAll(bundleMyExams);
+    addAll(_store.getJsonList(LocalStore.myExamsKey));
+
+    return byId.values.toList();
+  }
+
+  double? _dailyTargetFromMyExams(
+    List<Map<String, dynamic>> exams,
+    int? activeUserExamId,
+  ) {
+    if (exams.isEmpty) return null;
+
+    Map<String, dynamic>? activeExam;
+    for (final exam in exams) {
+      final id = (exam['id'] as num?)?.toInt();
+      if (activeUserExamId != null && id == activeUserExamId) {
+        activeExam = exam;
+        break;
+      }
+      if (activeExam == null && exam['isActive'] == true) {
+        activeExam = exam;
+      }
+    }
+
+    final candidates = [
+      if (activeExam != null) activeExam,
+      ...exams,
+    ];
+
+    for (final exam in candidates) {
+      final hours = (exam['dailyTargetHours'] as num?)?.toDouble();
+      if (hours != null && hours > 0) return hours;
+    }
+    return null;
+  }
+
+  /// Keeps dashboard + subject-progress caches in sync after local topic/hour edits.
+  Future<void> applyLocalProgressUpdate({
+    required SubjectDetailModel subjectDetail,
+    required bool wasCompleted,
+    required bool isCompleted,
+    required double studyHoursDelta,
+    required String studyDate,
+  }) async {
+    final dashData = _store.getJson(LocalStore.dashboardKey);
+    if (dashData == null) return;
+
+    final dash = Map<String, dynamic>.from(dashData);
+    final user = dash['user'];
+    if (user is! Map<String, dynamic>) return;
+
+    final examId = await _resolveExamIdForProgress(user);
+    if (examId == null) return;
+
+    final today = _fmtLocalDate(DateTime.now());
+    final newlyCompleted = isCompleted && !wasCompleted;
+
+    if (studyDate == today && studyHoursDelta != 0) {
+      dash['todayHours'] = math.max(
+        0.0,
+        ((dash['todayHours'] as num?) ?? 0).toDouble() + studyHoursDelta,
+      );
+    }
+
+    if (newlyCompleted) {
+      dash['todayTopicsCompleted'] =
+          ((dash['todayTopicsCompleted'] as num?) ?? 0).toInt() + 1;
+      dash['completedTopics'] =
+          ((dash['completedTopics'] as num?) ?? 0).toInt() + 1;
+      final total = ((dash['totalTopics'] as num?) ?? 0).toInt();
+      final completed = (dash['completedTopics'] as num).toInt();
+      dash['remainingTopics'] = math.max(0, total - completed);
+      dash['overallCompletionPercent'] =
+          total == 0 ? 0.0 : (completed * 100.0 / total);
+    }
+
+    if (studyHoursDelta != 0 || newlyCompleted) {
+      _patchWeeklyLog(
+        dash,
+        studyDate,
+        studyHoursDelta,
+        newlyCompleted ? 1 : 0,
+      );
+    }
+
+    final progressRow = _subjectDetailToProgressMap(subjectDetail, examId);
+    _patchSubjectProgressList(dash, progressRow);
+    await _store.putJson(LocalStore.dashboardKey, dash);
+
+    await _patchExamSubjectProgressCache(examId, progressRow);
+  }
+
+  /// Prefer cached subject-detail stats — they reflect local topic edits.
+  List<SubjectProgressModel> _enrichProgressRowsFromSubjectDetails(
+    List<SubjectProgressModel> rows,
+  ) {
+    return rows.map((row) {
+      final data = _store.getJson(_store.subjectDetailKey(row.subjectId));
+      if (data == null) return row;
+      try {
+        final detail = SubjectDetailModel.fromJson(data);
+        return SubjectProgressModel(
+          subjectId: row.subjectId,
+          subjectName: detail.subjectName,
+          iconName: detail.iconName,
+          colorCode: detail.colorCode,
+          displayOrder: row.displayOrder,
+          totalTopics: detail.totalTopics,
+          completedTopics: detail.completedTopics,
+          completionPercent: detail.completionPercent,
+          totalEstimatedHours: row.totalEstimatedHours,
+        );
+      } catch (_) {
+        return row;
+      }
+    }).toList();
+  }
+
+  Future<int?> _resolveExamIdForProgress(Map<String, dynamic> user) async {
+    final selected = (user['selectedExamId'] as num?)?.toInt();
+    if (selected != null) return selected;
+
+    final activeUserExamId = (user['activeUserExamId'] as num?)?.toInt();
+    final exams = await getMyExamsCached();
+    for (final exam in exams) {
+      if (activeUserExamId != null && exam.id == activeUserExamId) {
+        return exam.examId;
+      }
+      if (exam.isActive) return exam.examId;
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _subjectDetailToProgressMap(
+    SubjectDetailModel detail,
+    int examId,
+  ) {
+    var displayOrder = 0;
+    final cached = getSubjectProgressCached(examId);
+    if (cached != null) {
+      for (final row in cached) {
+        if (row.subjectId == detail.subjectId) {
+          displayOrder = row.displayOrder;
+          break;
+        }
+      }
+    }
+    return {
+      'subjectId': detail.subjectId,
+      'subjectName': detail.subjectName,
+      'iconName': detail.iconName,
+      'colorCode': detail.colorCode,
+      'displayOrder': displayOrder,
+      'totalTopics': detail.totalTopics,
+      'completedTopics': detail.completedTopics,
+      'completionPercent': detail.completionPercent,
+      'totalEstimatedHours': 0.0,
+    };
+  }
+
+  void _patchSubjectProgressList(
+    Map<String, dynamic> dash,
+    Map<String, dynamic> row,
+  ) {
+    final subjectId = (row['subjectId'] as num).toInt();
+    final progress = dash['subjectProgress'];
+    if (progress is! List) {
+      dash['subjectProgress'] = [row];
+      return;
+    }
+
+    var updated = false;
+    for (var i = 0; i < progress.length; i++) {
+      final item = progress[i];
+      if (item is Map &&
+          (item['subjectId'] as num?)?.toInt() == subjectId) {
+        progress[i] = row;
+        updated = true;
+        break;
+      }
+    }
+    if (!updated) progress.add(row);
+  }
+
+  void _patchWeeklyLog(
+    Map<String, dynamic> dash,
+    String studyDate,
+    double hoursDelta,
+    int topicsDelta,
+  ) {
+    final logs = dash['weeklyLogs'];
+    final list = logs is List
+        ? logs
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList()
+        : <Map<String, dynamic>>[];
+
+    var found = false;
+    for (final log in list) {
+      if (log['studyDate'] == studyDate) {
+        log['hoursStudied'] = math.max(
+          0.0,
+          ((log['hoursStudied'] as num?) ?? 0).toDouble() + hoursDelta,
+        );
+        log['topicsCompleted'] = math.max(
+          0,
+          ((log['topicsCompleted'] as num?) ?? 0).toInt() + topicsDelta,
+        );
+        found = true;
+        break;
+      }
+    }
+    if (!found && (hoursDelta != 0 || topicsDelta != 0)) {
+      list.add({
+        'studyDate': studyDate,
+        'hoursStudied': math.max(0.0, hoursDelta),
+        'topicsCompleted': math.max(0, topicsDelta),
+      });
+    }
+    dash['weeklyLogs'] = list;
+  }
+
+  Future<void> _patchExamSubjectProgressCache(
+    int examId,
+    Map<String, dynamic> row,
+  ) async {
+    final list = _store.getJsonList(_store.subjectProgressKey(examId));
+    final progress = list != null
+        ? list.map((e) => Map<String, dynamic>.from(e as Map)).toList()
+        : <Map<String, dynamic>>[];
+
+    final subjectId = (row['subjectId'] as num).toInt();
+    var updated = false;
+    for (var i = 0; i < progress.length; i++) {
+      if ((progress[i]['subjectId'] as num?)?.toInt() == subjectId) {
+        progress[i] = row;
+        updated = true;
+        break;
+      }
+    }
+    if (!updated) progress.add(row);
+    await _store.putJson(_store.subjectProgressKey(examId), progress);
   }
 
   Future<List<UserExamModel>> getMyExamsCached() async {
@@ -166,6 +601,8 @@ class DashboardRepository {
     }
     if (subjects.isEmpty && progressRows.isEmpty) return null;
 
+    progressRows = _enrichProgressRowsFromSubjectDetails(progressRows);
+
     return ExamSubjectsCacheGroup(
       exam: exam,
       subjects: subjects,
@@ -188,13 +625,11 @@ class DashboardRepository {
       ApiCallTracker.instance.record('GET ${ApiEndpoints.dashboard}');
       final response = await _client.dio.get(ApiEndpoints.dashboard);
       final data = response.data['data'] as Map<String, dynamic>;
-      await _store.putJson(LocalStore.dashboardKey, data);
-      cacheEmbeddedDashboardProgress(data);
-      final user = data['user'];
-      if (user != null) {
-        await _store.putJson(LocalStore.userProfileKey, user);
-      }
-      return DashboardModel.fromJson(data);
+      await storeSyncedDashboard(
+        data,
+        profileUser: _store.getJson(LocalStore.userProfileKey),
+      );
+      return DashboardModel.fromJson(_store.getJson(LocalStore.dashboardKey)!);
     } catch (_) {
       if (fallback != null) return fallback;
       rethrow;
@@ -367,6 +802,8 @@ class DashboardRepository {
         daysLeft: exam.daysLeft,
         totalSubjects: exam.totalSubjects,
         progressPercent: exam.progressPercent,
+        dailyTargetHours: exam.dailyTargetHours,
+        weeklyTargetHours: exam.weeklyTargetHours,
         isActive: active,
       );
     }).toList();
@@ -484,9 +921,9 @@ class DashboardRepository {
     if (user is Map<String, dynamic>) {
       user['dailyTargetHours'] = dailyTargetHours;
       user['weeklyTargetHours'] = (dailyTargetHours * 7 * 10).round() / 10.0;
+      await _store.putJson(LocalStore.dashboardKey, data);
+      await _store.putJson(LocalStore.userProfileKey, user);
     }
-    await _store.putJson(LocalStore.dashboardKey, data);
-    await _store.putJson(LocalStore.userProfileKey, user);
   }
 
   Future<List<SubjectModel>> getSubjectsByExam(int examId) async {

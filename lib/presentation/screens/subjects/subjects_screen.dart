@@ -227,8 +227,10 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
         if (!group.exam.isActive) {
           await _repo.setActiveMyExam(group.exam.id);
         }
-        if (!context.mounted) return;
-        context.go('/subjects/${subject.id}');
+        if (!mounted) return;
+        await context.push('/subjects/${subject.id}');
+        if (!mounted) return;
+        _loadFromLocal();
       },
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),

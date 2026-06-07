@@ -79,6 +79,16 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     return _detail!.chapters.expand((chapter) => chapter.topics).toList();
   }
 
+  int get _liveTotalTopics => _allTopics.length;
+
+  int get _liveCompletedTopics => _allTopics
+      .where((topic) => _statusOf(topic) == _TopicStatus.completed)
+      .length;
+
+  double get _liveCompletionPercent => _liveTotalTopics == 0
+      ? 0.0
+      : (_liveCompletedTopics * 100.0 / _liveTotalTopics);
+
   List<TopicModel> get _filteredTopics {
     return _allTopics.where((topic) {
       final status = _statusOf(topic);
@@ -175,12 +185,13 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
 
     _showSuccessDialog(topic.title, hours);
 
-    GetIt.I<ProgressRepository>().persistTopicProgressInBackground(
+    await GetIt.I<ProgressRepository>().persistTopicProgress(
       subjectId: widget.subjectId,
       topicId: topic.id,
+      wasCompleted: topic.isCompleted,
       isCompleted: true,
       actualHours: hours,
-      studyHoursDelta: delta > 0 ? delta : null,
+      studyHoursDelta: delta != 0 ? delta : null,
       studyDate: _localTodayDate(),
     );
 
@@ -203,12 +214,13 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     );
     if (!mounted) return;
 
-    GetIt.I<ProgressRepository>().persistTopicProgressInBackground(
+    await GetIt.I<ProgressRepository>().persistTopicProgress(
       subjectId: widget.subjectId,
       topicId: topic.id,
+      wasCompleted: topic.isCompleted,
       isCompleted: topic.isCompleted,
       actualHours: hours,
-      studyHoursDelta: delta > 0 ? delta : null,
+      studyHoursDelta: delta != 0 ? delta : null,
       studyDate: _localTodayDate(),
     );
 
@@ -260,7 +272,9 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
 
     final d = _detail!;
     final color = d.color;
-    final pct = d.completionPercent / 100;
+    final pct = _liveCompletionPercent / 100;
+    final completedTopics = _liveCompletedTopics;
+    final totalTopics = _liveTotalTopics;
 
     final isDesktop = ResponsiveHelper.isDesktop(context);
     return Scaffold(
@@ -304,6 +318,9 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
                     detail: d,
                     color: color,
                     pct: pct,
+                    completedTopics: completedTopics,
+                    totalTopics: totalTopics,
+                    completionPercent: _liveCompletionPercent,
                     localTotalHours: _localTotalHours,
                   ),
                 ),
@@ -314,7 +331,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
                   child: Row(
                     children: [
                       Text(
-                        'Topics (${d.totalTopics})',
+                        'Topics ($totalTopics)',
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
@@ -427,12 +444,18 @@ class _ProgressSection extends StatelessWidget {
   final SubjectDetailModel detail;
   final Color color;
   final double pct;
+  final int completedTopics;
+  final int totalTopics;
+  final double completionPercent;
   final double localTotalHours;
 
   const _ProgressSection({
     required this.detail,
     required this.color,
     required this.pct,
+    required this.completedTopics,
+    required this.totalTopics,
+    required this.completionPercent,
     required this.localTotalHours,
   });
 
@@ -465,7 +488,7 @@ class _ProgressSection extends StatelessWidget {
                           strokeCap: StrokeCap.round,
                         ),
                         Text(
-                          '${detail.completionPercent.toStringAsFixed(0)}%',
+                          '${completionPercent.toStringAsFixed(0)}%',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
@@ -490,7 +513,7 @@ class _ProgressSection extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          '${detail.completedTopics} / ${detail.totalTopics} Topics Completed',
+                          '$completedTopics / $totalTopics Topics Completed',
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
@@ -536,7 +559,7 @@ class _ProgressSection extends StatelessWidget {
             _StatCard(
               icon: Icons.check_circle_outline_rounded,
               iconColor: const Color(0xFF43A047),
-              value: '${detail.completedTopics}',
+              value: '$completedTopics',
               label: 'Completed',
             ),
             const SizedBox(width: 10),
