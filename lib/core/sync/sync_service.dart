@@ -100,12 +100,20 @@ class SyncService {
   Future<void> initialDownload({
     required void Function(SyncProgress progress) onProgress,
   }) async {
-    if (!await isOnline()) {
-      throw StateError('Internet required for initial download.');
-    }
-    await _downloadAll(onProgress: onProgress, incremental: false);
-    _emit(SyncStep.complete, onProgress);
+    await downloadAllContent(onProgress: onProgress, incremental: false);
     _setStatus(SyncStatus.success);
+  }
+
+  /// Full content download — used after login and after adding a new exam.
+  Future<void> downloadAllContent({
+    required void Function(SyncProgress progress) onProgress,
+    bool incremental = false,
+  }) async {
+    if (!await isOnline()) {
+      throw StateError('Internet required to download exam content.');
+    }
+    await _downloadAll(onProgress: onProgress, incremental: incremental);
+    _emit(SyncStep.complete, onProgress);
   }
 
   /// User-triggered SYNC: upload pending → download latest.
@@ -177,12 +185,6 @@ class SyncService {
           await _progressRepository.flushQueuedTopicProgress(item);
         } else if (action == 'LOG_STUDY_HOURS' || type == 'LOG_STUDY') {
           await _progressRepository.flushQueuedStudyLog(item);
-        } else if (action == 'STUDY_HOURS') {
-          final hours =
-              (item['payload']?['dailyTargetHours'] as num?)?.toDouble();
-          if (hours != null) {
-            await _dashboardRepository.updateStudyHours(hours);
-          }
         } else {
           continue;
         }
@@ -475,7 +477,7 @@ class SyncService {
       await _authRepository.getMe();
     } catch (_) {}
 
-    await _dashboardRepository.syncDailyTargetFromProfile();
+    await _dashboardRepository.reconcileDashboardCache();
 
     final progressMap = data['subjectProgressByExamId'];
     if (progressMap is Map) {

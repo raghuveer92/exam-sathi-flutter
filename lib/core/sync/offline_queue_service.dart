@@ -76,7 +76,6 @@ class OfflineQueueService {
         'COMPLETE_TOPIC' || 'ADD_STUDY_HOURS' || 'TOPIC_PROGRESS' =>
           'TOPIC_PROGRESS',
         'LOG_STUDY_HOURS' || 'LOG_STUDY' => 'LOG_STUDY',
-        'STUDY_HOURS' => 'STUDY_HOURS',
         _ => action,
       };
 
@@ -94,13 +93,11 @@ class OfflineQueueService {
         action == 'COMPLETE_TOPIC' ||
         action == 'ADD_STUDY_HOURS' ||
         action == 'LOG_STUDY_HOURS' ||
-        action == 'STUDY_HOURS' ||
         type == 'TOPIC_PROGRESS' ||
-        type == 'LOG_STUDY' ||
-        type == 'STUDY_HOURS';
+        type == 'LOG_STUDY';
   }
 
-  /// Push remaining queue types (e.g. STUDY_HOURS) one item at a time.
+  /// Push remaining queue types one item at a time.
   Future<bool> flush({bool force = false}) async {
     final queue = _readQueue();
     if (queue.isEmpty) return true;

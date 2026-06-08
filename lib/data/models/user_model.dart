@@ -76,8 +76,6 @@ class UserModel extends Equatable {
         'selectedExamName': selectedExamName,
         'examDate': examDate,
         'syllabusTargetDate': syllabusTargetDate,
-        'dailyTargetHours': dailyTargetHours,
-        'weeklyTargetHours': weeklyTargetHours,
         'daysUntilExam': daysUntilExam,
         'activeUserExamId': activeUserExamId,
         'userExams': userExams.map((e) => e.toJson()).toList(),

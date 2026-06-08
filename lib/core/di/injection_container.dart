@@ -10,6 +10,7 @@ import '../../data/repositories/progress_repository.dart';
 import '../../data/repositories/sync_repository.dart';
 import '../local/local_store.dart';
 import '../network/api_client.dart';
+import '../study/daily_target_calculator.dart';
 import '../sync/offline_queue_service.dart';
 import '../sync/progress_rebuild_service.dart';
 import '../sync/sync_service.dart';
@@ -60,6 +61,10 @@ Future<void> setupDependencies() async {
         store: sl<LocalStore>(),
         offlineQueue: sl<OfflineQueueService>(),
       ));
+  sl.registerLazySingleton<DailyTargetCalculator>(() => DailyTargetCalculator(
+        store: sl<LocalStore>(),
+        dashboardRepository: sl<DashboardRepository>(),
+      ));
   sl.registerLazySingleton<ProgressRebuildService>(() => ProgressRebuildService(
         store: sl<LocalStore>(),
         dashboardRepository: sl<DashboardRepository>(),
@@ -97,7 +102,7 @@ Future<void> setupDependencies() async {
       () => AuthBloc(authRepository: sl<AuthRepository>()));
   sl.registerFactory<DashboardBloc>(() => DashboardBloc(
         repository: sl<DashboardRepository>(),
-        offlineQueue: sl<OfflineQueueService>(),
         progressRebuildService: sl<ProgressRebuildService>(),
+        dailyTargetCalculator: sl<DailyTargetCalculator>(),
       ));
 }

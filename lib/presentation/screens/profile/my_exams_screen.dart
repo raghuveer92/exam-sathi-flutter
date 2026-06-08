@@ -4,11 +4,13 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/study/daily_target_calculator.dart';
 import '../../../core/sync/progress_rebuild_service.dart';
 import '../../../data/models/exam_subject_group_model.dart';
 import '../../../data/models/exam_model.dart';
 import '../../../data/models/user_model.dart';
 import '../../../data/models/user_exam_model.dart';
+import '../../../data/repositories/auth_repository.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
@@ -26,6 +28,7 @@ class MyExamsScreen extends StatefulWidget {
 
 class _MyExamsScreenState extends State<MyExamsScreen> {
   final _repo = GetIt.I<DashboardRepository>();
+  final _dailyTargetCalculator = GetIt.I<DailyTargetCalculator>();
   bool _loading = true;
   List<UserExamModel> _myExams = const [];
 
@@ -36,6 +39,16 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
 
   String _formatDate(DateTime date) {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  String _formatDailyTarget(double hours) {
+    if (hours <= 0) return '0h';
+    final totalMinutes = (hours * 60).round();
+    final h = totalMinutes ~/ 60;
+    final m = totalMinutes % 60;
+    if (h == 0) return '${m}m';
+    if (m == 0) return '${h}h';
+    return '${h}h ${m}m';
   }
 
   InputDecoration _dialogFieldDecoration({
@@ -421,13 +434,28 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
     final selections = await _collectSelections(selected!.name, groups);
     if (selections == null) return;
 
-    await _repo.addMyExam(
-      examId: selected!.id,
-      examDate: targetDate,
-      subjectSelections: selections,
-    );
-    await _load();
-    await _syncUserInState();
+    setState(() => _loading = true);
+    try {
+      final user = await _repo.addMyExam(
+        examId: selected!.id,
+        examDate: targetDate,
+        subjectSelections: selections,
+      );
+      await GetIt.I<AuthRepository>().cacheUser(user);
+      await _repo.applyEnrollmentToCache(user);
+      if (!mounted) return;
+      context.read<AuthBloc>().add(AuthUserUpdated(user: user));
+      context.read<DashboardBloc>().add(DashboardResetRequested());
+      context.go(
+        '/offline-setup?redirect=${Uri.encodeComponent('/my-exams')}&title=${Uri.encodeComponent('Downloading Exam Content')}',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+      );
+    }
   }
 
   Future<List<Map<String, dynamic>>?> _collectSelections(
@@ -552,9 +580,9 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
         await _repo.setActiveMyExam(fallback.id);
       }
 
-      await _repo.deleteMyExam(ue.id);
+      final user = await _repo.deleteMyExam(ue.id);
       await _load();
-      await _syncUserInState();
+      await _syncUserInState(user: user);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -632,11 +660,16 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
                           const SizedBox(height: 8),
                           Text('Syllabus target: ${e.examDate ?? 'Not set'}'),
                           Text('Days left to target: ${e.daysLeft?.toString() ?? '--'}'),
-                          if (e.dailyTargetHours != null && e.dailyTargetHours! > 0)
-                            Text(
-                              'Daily target: ${e.dailyTargetHours!.toStringAsFixed(1)}h · '
-                              'Weekly: ${(e.weeklyTargetHours ?? e.dailyTargetHours! * 7).toStringAsFixed(1)}h',
-                            ),
+                          Builder(
+                            builder: (context) {
+                              final daily =
+                                  _dailyTargetCalculator.calculateDailyTargetForExam(e);
+                              if (daily <= 0) return const SizedBox.shrink();
+                              return Text(
+                                'Daily target: ${_formatDailyTarget(daily)}/day',
+                              );
+                            },
+                          ),
                           Text('Subjects: ${e.totalSubjects?.toString() ?? '--'}'),
                           Text('Progress: ${(e.progressPercent ?? 0).toStringAsFixed(1)}%'),
                           const SizedBox(height: 8),

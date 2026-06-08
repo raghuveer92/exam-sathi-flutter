@@ -9,9 +9,16 @@ import '../../../core/sync/sync_progress.dart';
 import '../../../core/sync/sync_service.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 
-/// Shown after first login — downloads all data before normal usage.
+/// Downloads syllabus, subjects, and progress — after login or adding an exam.
 class OfflineSetupScreen extends StatefulWidget {
-  const OfflineSetupScreen({super.key});
+  final String redirectPath;
+  final String title;
+
+  const OfflineSetupScreen({
+    super.key,
+    this.redirectPath = '/home',
+    this.title = 'Preparing Offline Content',
+  });
 
   @override
   State<OfflineSetupScreen> createState() => _OfflineSetupScreenState();
@@ -33,16 +40,16 @@ class _OfflineSetupScreenState extends State<OfflineSetupScreen> {
       _progress = const SyncProgress(step: SyncStep.preparing);
     });
     try {
-      await GetIt.I<SyncService>().initialDownload(
+      await GetIt.I<SyncService>().downloadAllContent(
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);
         },
       );
-      await GetIt.I<DashboardRepository>().syncDailyTargetFromProfile();
+      await GetIt.I<DashboardRepository>().reconcileDashboardCache();
       await GetIt.I<ProgressRebuildService>().rebuildAll();
       await GetIt.I<LocalStore>().markInitialDownloadComplete();
       if (!mounted) return;
-      context.go('/home');
+      context.go(widget.redirectPath);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
@@ -61,7 +68,7 @@ class _OfflineSetupScreenState extends State<OfflineSetupScreen> {
                   size: 72, color: AppColors.primary),
               const SizedBox(height: 24),
               Text(
-                _error == null ? 'Preparing Offline Content' : 'Download Failed',
+                _error == null ? widget.title : 'Download Failed',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -99,7 +106,7 @@ class _OfflineSetupScreenState extends State<OfflineSetupScreen> {
                   child: const Text('Retry Download'),
                 ),
                 TextButton(
-                  onPressed: () => context.go('/home'),
+                  onPressed: () => context.go(widget.redirectPath),
                   child: const Text('Continue with cached data'),
                 ),
               ],

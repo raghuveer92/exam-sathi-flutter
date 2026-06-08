@@ -175,8 +175,6 @@ class ProgressRebuildService {
         daysLeft: exam.daysLeft,
         totalSubjects: exam.totalSubjects,
         progressPercent: progressPercent,
-        dailyTargetHours: exam.dailyTargetHours,
-        weeklyTargetHours: exam.weeklyTargetHours,
         isActive: exam.isActive,
       );
     }).toList();

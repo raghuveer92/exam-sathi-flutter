@@ -46,8 +46,6 @@ class UserExamModel extends Equatable {
         'daysLeft': daysLeft,
         'totalSubjects': totalSubjects,
         'progressPercent': progressPercent,
-        'dailyTargetHours': dailyTargetHours,
-        'weeklyTargetHours': weeklyTargetHours,
         'isActive': isActive,
       };
 

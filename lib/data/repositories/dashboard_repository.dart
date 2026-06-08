@@ -31,14 +31,15 @@ int? _daysLeftFromExamDate(String dateStr) {
   return examDay.difference(todayDate).inDays;
 }
 
-({double daily, double weekly})? _autoStudyHoursFromTotal(
-  double totalHours,
-  int daysRemaining,
-) {
-  if (totalHours <= 0 || daysRemaining <= 0) return null;
-  final daily = ((totalHours / daysRemaining) * 10).round() / 10.0;
-  final weekly = ((daily * 7) * 10).round() / 10.0;
-  return (daily: daily, weekly: weekly);
+void _stripStoredStudyTargets(Map<String, dynamic> map) {
+  map.remove('dailyTargetHours');
+  map.remove('weeklyTargetHours');
+  final exams = map['userExams'];
+  if (exams is List) {
+    for (final raw in exams) {
+      if (raw is Map<String, dynamic>) _stripStoredStudyTargets(raw);
+    }
+  }
 }
 
 /// Local-only grouping for subjects screen.
@@ -79,29 +80,31 @@ class DashboardRepository {
     return DashboardModel.fromJson(hydrated);
   }
 
-  /// Reconcile daily target + myExams from profile and sync bundle caches.
+  /// Reconcile myExams from profile and sync bundle caches.
   Map<String, dynamic> _hydrateDashboardMap(Map<String, dynamic> data) {
-    return _mergeDailyTargetIntoDashboard(
+    return _mergeMyExamsIntoDashboard(
       data,
       bundleMyExams: _store.getJsonList(LocalStore.myExamsKey),
       profileUser: _store.getJson(LocalStore.userProfileKey),
     );
   }
 
-  /// Patch dashboard user daily target from cached profile after login/sync.
-  Future<void> syncDailyTargetFromProfile() async {
+  /// Reconcile dashboard cache after login/sync (no derived study targets).
+  Future<void> reconcileDashboardCache() async {
     final dash = _store.getJson(LocalStore.dashboardKey);
     if (dash == null) return;
-    final merged = _mergeDailyTargetIntoDashboard(
-      dash,
-      bundleMyExams: _store.getJsonList(LocalStore.myExamsKey),
-      profileUser: _store.getJson(LocalStore.userProfileKey),
-    );
+    final merged = _hydrateDashboardMap(dash);
     await _store.putJson(LocalStore.dashboardKey, merged);
     final user = merged['user'];
-    if (user != null) {
+    if (user is Map<String, dynamic>) {
       await _store.putJson(LocalStore.userProfileKey, user);
     }
+
+    final queue = _offlineQueue.pendingItems
+        .where((e) =>
+            e['action'] != 'STUDY_HOURS' && e['type'] != 'STUDY_HOURS')
+        .toList();
+    await _store.putJson(LocalStore.offlineQueueKey, queue);
   }
 
   /// Persist server dashboard without wiping a known local daily target.
@@ -111,7 +114,7 @@ class DashboardRepository {
     Map<String, dynamic>? profileUser,
   }) async {
     final localDash = _store.getJson(LocalStore.dashboardKey);
-    var merged = _mergeDailyTargetIntoDashboard(
+    var merged = _mergeMyExamsIntoDashboard(
       remote,
       bundleMyExams: bundleMyExams ?? _store.getJsonList(LocalStore.myExamsKey),
       profileUser: profileUser ?? _store.getJson(LocalStore.userProfileKey),
@@ -229,26 +232,16 @@ class DashboardRepository {
     return byDate.values.toList();
   }
 
-  Map<String, dynamic> _mergeDailyTargetIntoDashboard(
+  Map<String, dynamic> _mergeMyExamsIntoDashboard(
     Map<String, dynamic> remote, {
     List<dynamic>? bundleMyExams,
     Map<String, dynamic>? profileUser,
   }) {
     final merged = Map<String, dynamic>.from(remote);
-    final local = _store.getJson(LocalStore.dashboardKey);
     final remoteUser = merged['user'];
     if (remoteUser is! Map<String, dynamic>) return merged;
 
     final user = Map<String, dynamic>.from(remoteUser);
-    final remoteDaily = (user['dailyTargetHours'] as num?)?.toDouble();
-    final localUser = local?['user'];
-    final localDaily = localUser is Map<String, dynamic>
-        ? (localUser['dailyTargetHours'] as num?)?.toDouble()
-        : null;
-    final profileDaily = profileUser is Map<String, dynamic>
-        ? (profileUser['dailyTargetHours'] as num?)?.toDouble()
-        : null;
-
     final examMaps = _collectExamMaps(
       dashboard: merged,
       bundleMyExams: bundleMyExams,
@@ -256,35 +249,18 @@ class DashboardRepository {
     );
     if (examMaps.isNotEmpty) {
       merged['myExams'] = examMaps;
-    }
-
-    double? resolvedDaily;
-    if (remoteDaily != null && remoteDaily > 0) {
-      resolvedDaily = remoteDaily;
-    } else if (profileDaily != null && profileDaily > 0) {
-      resolvedDaily = profileDaily;
-    } else if (localDaily != null && localDaily > 0) {
-      resolvedDaily = localDaily;
-    } else {
-      resolvedDaily = _dailyTargetFromMyExams(
-        examMaps,
-        (user['activeUserExamId'] as num?)?.toInt(),
-      );
-    }
-
-    if (resolvedDaily != null && resolvedDaily > 0) {
-      user['dailyTargetHours'] = resolvedDaily;
-      user['weeklyTargetHours'] =
-          (user['weeklyTargetHours'] as num?)?.toDouble() ??
-              (profileUser?['weeklyTargetHours'] as num?)?.toDouble() ??
-              (resolvedDaily * 7 * 10).round() / 10.0;
-    }
-
-    if (examMaps.isNotEmpty) {
       user['userExams'] = _enrichUserExamsFromExamMaps(
         user['userExams'] as List<dynamic>?,
         examMaps,
       );
+    }
+
+    _stripStoredStudyTargets(user);
+    final myExams = merged['myExams'];
+    if (myExams is List) {
+      for (final raw in myExams) {
+        if (raw is Map<String, dynamic>) _stripStoredStudyTargets(raw);
+      }
     }
 
     merged['user'] = user;
@@ -311,12 +287,7 @@ class DashboardRepository {
       final id = (copy['id'] as num?)?.toInt();
       final source = id != null ? byId[id] : null;
       if (source != null) {
-        for (final key in [
-          'dailyTargetHours',
-          'weeklyTargetHours',
-          'isActive',
-          'examDate',
-        ]) {
+        for (final key in ['isActive', 'examDate']) {
           final value = source[key];
           if (value != null) copy[key] = value;
         }
@@ -348,10 +319,7 @@ class DashboardRepository {
         for (final entry in raw.entries) {
           final value = entry.value;
           if (value == null) continue;
-          if (entry.key == 'dailyTargetHours' ||
-              entry.key == 'weeklyTargetHours' ||
-              entry.key == 'isActive' ||
-              entry.key == 'examDate') {
+          if (entry.key == 'isActive' || entry.key == 'examDate') {
             merged[entry.key] = value;
           } else if (!merged.containsKey(entry.key) || merged[entry.key] == null) {
             merged[entry.key] = value;
@@ -373,36 +341,6 @@ class DashboardRepository {
     addAll(_store.getJsonList(LocalStore.myExamsKey));
 
     return byId.values.toList();
-  }
-
-  double? _dailyTargetFromMyExams(
-    List<Map<String, dynamic>> exams,
-    int? activeUserExamId,
-  ) {
-    if (exams.isEmpty) return null;
-
-    Map<String, dynamic>? activeExam;
-    for (final exam in exams) {
-      final id = (exam['id'] as num?)?.toInt();
-      if (activeUserExamId != null && id == activeUserExamId) {
-        activeExam = exam;
-        break;
-      }
-      if (activeExam == null && exam['isActive'] == true) {
-        activeExam = exam;
-      }
-    }
-
-    final candidates = [
-      if (activeExam != null) activeExam,
-      ...exams,
-    ];
-
-    for (final exam in candidates) {
-      final hours = (exam['dailyTargetHours'] as num?)?.toDouble();
-      if (hours != null && hours > 0) return hours;
-    }
-    return null;
   }
 
   /// Persist weekly study logs from GET /progress/weekly into dashboard cache.
@@ -988,20 +926,9 @@ class DashboardRepository {
     final daysLeft = _daysLeftFromExamDate(dateStr);
 
     final exams = await resolveMyExamsFromCache();
-    final targetExam = exams.firstWhere(
-      (exam) => exam.id == userExamId,
-      orElse: () => throw StateError('Exam not found offline. Tap SYNC while online.'),
-    );
-
-    final totalHours = await _estimateTotalHoursForUserExam(
-      targetExam.examId,
-      userExamId,
-    );
-    final autoHours = await _resolveAutoStudyHoursForDateChange(
-      exam: targetExam,
-      newDaysLeft: daysLeft,
-      syllabusTotalHours: totalHours,
-    );
+    if (!exams.any((exam) => exam.id == userExamId)) {
+      throw StateError('Exam not found offline. Tap SYNC while online.');
+    }
 
     UserExamModel? updated;
     final updatedExams = exams.map((exam) {
@@ -1014,8 +941,6 @@ class DashboardRepository {
         daysLeft: daysLeft,
         totalSubjects: exam.totalSubjects,
         progressPercent: exam.progressPercent,
-        dailyTargetHours: autoHours?.daily ?? exam.dailyTargetHours,
-        weeklyTargetHours: autoHours?.weekly ?? exam.weeklyTargetHours,
         isActive: exam.isActive,
       );
       return updated!;
@@ -1037,11 +962,8 @@ class DashboardRepository {
     if (patchedExam.isActive) {
       profile['examDate'] = dateStr;
       profile['daysUntilExam'] = daysLeft;
-      if (autoHours != null) {
-        profile['dailyTargetHours'] = autoHours.daily;
-        profile['weeklyTargetHours'] = autoHours.weekly;
-      }
     }
+    _stripStoredStudyTargets(profile);
 
     final dashData = _store.getJson(LocalStore.dashboardKey);
     if (dashData != null) {
@@ -1053,148 +975,6 @@ class DashboardRepository {
 
     await _store.putJson(LocalStore.userProfileKey, profile);
     return UserModel.fromJson(profile);
-  }
-
-  Future<double> _estimateTotalHoursForUserExam(int examId, int userExamId) async {
-    var total = 0.0;
-    final subjects = resolveVisibleSubjects(examId);
-
-    for (final subject in subjects) {
-      var subjectHours = 0.0;
-      final data = _store.getJson(_store.subjectDetailKey(userExamId, subject.id));
-      if (data != null) {
-        final chapters = data['chapters'];
-        if (chapters is List) {
-          for (final chapter in chapters) {
-            if (chapter is! Map) continue;
-            final topics = chapter['topics'];
-            if (topics is List) {
-              for (final topic in topics) {
-                if (topic is Map) {
-                  subjectHours +=
-                      ((topic['estimatedHours'] as num?) ?? 1.0).toDouble();
-                }
-              }
-            }
-          }
-        }
-      }
-
-      if (subjectHours <= 0) {
-        subjectHours = _estimatedHoursFromSyncCatalog(subject.id);
-      }
-
-      if (subjectHours <= 0) {
-        final progress = getSubjectProgressCached(examId);
-        if (progress != null) {
-          for (final row in progress) {
-            if (row.subjectId == subject.id && row.totalEstimatedHours > 0) {
-              subjectHours = row.totalEstimatedHours;
-              break;
-            }
-          }
-        }
-      }
-      total += subjectHours;
-    }
-
-    if (total <= 0) {
-      total = _estimatedHoursFromSyncCatalogForExam(examId, subjects);
-    }
-
-    if (total <= 0) {
-      final dash = await getDashboardCached();
-      if (dash != null && dash.totalEstimatedHours > 0) {
-        return dash.totalEstimatedHours;
-      }
-    }
-    return total;
-  }
-
-  double _estimatedHoursFromSyncCatalog(int subjectId) {
-    final catalog = _store.getJson(LocalStore.syncCatalogMasterKey);
-    if (catalog == null) return 0;
-
-    final chapters = catalog['chapters'];
-    final topics = catalog['topics'];
-    if (chapters is! List || topics is! List) return 0;
-
-    final chapterIds = <int>{};
-    for (final raw in chapters) {
-      if (raw is! Map) continue;
-      if ((raw['subjectId'] as num?)?.toInt() == subjectId &&
-          raw['isActive'] != false) {
-        final id = (raw['id'] as num?)?.toInt();
-        if (id != null) chapterIds.add(id);
-      }
-    }
-    if (chapterIds.isEmpty) return 0;
-
-    var total = 0.0;
-    for (final raw in topics) {
-      if (raw is! Map) continue;
-      if (raw['isActive'] == false) continue;
-      final chapterId = (raw['chapterId'] as num?)?.toInt();
-      if (chapterId == null || !chapterIds.contains(chapterId)) continue;
-      total += ((raw['estimatedHours'] as num?) ?? 1.0).toDouble();
-    }
-    return total;
-  }
-
-  double _estimatedHoursFromSyncCatalogForExam(
-    int examId,
-    List<SubjectModel> subjects,
-  ) {
-    if (subjects.isEmpty) return 0;
-    var total = 0.0;
-    for (final subject in subjects) {
-      total += _estimatedHoursFromSyncCatalog(subject.id);
-    }
-    return total;
-  }
-
-  Future<({double daily, double weekly})?> _resolveAutoStudyHoursForDateChange({
-    required UserExamModel exam,
-    required int? newDaysLeft,
-    required double syllabusTotalHours,
-  }) async {
-    if (newDaysLeft == null || newDaysLeft <= 0) return null;
-
-    if (syllabusTotalHours > 0) {
-      return _autoStudyHoursFromTotal(syllabusTotalHours, newDaysLeft);
-    }
-
-    final previousDaily = await _resolvePreviousDailyTarget(exam);
-    final previousDaysLeft =
-        exam.daysLeft ?? _daysLeftFromExamDate(exam.examDate ?? '');
-    if (previousDaily != null &&
-        previousDaily > 0 &&
-        previousDaysLeft != null &&
-        previousDaysLeft > 0) {
-      final inferredTotal = previousDaily * previousDaysLeft;
-      return _autoStudyHoursFromTotal(inferredTotal, newDaysLeft);
-    }
-
-    return null;
-  }
-
-  Future<double?> _resolvePreviousDailyTarget(UserExamModel exam) async {
-    if (exam.dailyTargetHours != null && exam.dailyTargetHours! > 0) {
-      return exam.dailyTargetHours;
-    }
-    if (!exam.isActive) return null;
-
-    final profile = _store.getJson(LocalStore.userProfileKey);
-    final profileDaily = (profile?['dailyTargetHours'] as num?)?.toDouble();
-    if (profileDaily != null && profileDaily > 0) return profileDaily;
-
-    final dash = _store.getJson(LocalStore.dashboardKey);
-    final dashUser = dash?['user'];
-    if (dashUser is Map<String, dynamic>) {
-      final dashDaily = (dashUser['dailyTargetHours'] as num?)?.toDouble();
-      if (dashDaily != null && dashDaily > 0) return dashDaily;
-    }
-    return null;
   }
 
   Future<void> _queueExamDateChange(int userExamId, DateTime examDate) async {
@@ -1282,8 +1062,6 @@ class DashboardRepository {
         daysLeft: exam.daysLeft,
         totalSubjects: exam.totalSubjects,
         progressPercent: exam.progressPercent,
-        dailyTargetHours: exam.dailyTargetHours,
-        weeklyTargetHours: exam.weeklyTargetHours,
         isActive: active,
       );
     }).toList();
@@ -1322,20 +1100,50 @@ class DashboardRepository {
   }
 
   Future<void> _applyUserToCache(UserModel user) async {
-    await _store.putJson(LocalStore.userProfileKey, user.toJson());
+    final userJson = user.toJson();
+    _stripStoredStudyTargets(userJson);
+    final examsJson = user.userExams.map((e) => e.toJson()).toList();
+
+    await _store.putJson(LocalStore.userProfileKey, userJson);
+    await _store.putJson(LocalStore.myExamsKey, examsJson);
+
     final dashData = _store.getJson(LocalStore.dashboardKey);
     if (dashData != null) {
       final dash = Map<String, dynamic>.from(dashData);
-      dash['user'] = user.toJson();
-      if (user.userExams.isNotEmpty) {
-        dash['myExams'] = user.userExams.map((e) => e.toJson()).toList();
-        await _store.putJson(
-          LocalStore.myExamsKey,
-          user.userExams.map((e) => e.toJson()).toList(),
-        );
-      }
+      dash['user'] = userJson;
+      dash['myExams'] = examsJson;
       await _store.putJson(LocalStore.dashboardKey, dash);
     }
+  }
+
+  /// Persist enrollment/add-exam API response before running a full download.
+  Future<void> applyEnrollmentToCache(UserModel user) async {
+    await _store.putJson(LocalStore.userProfileKey, user.toJson());
+    if (user.userExams.isNotEmpty) {
+      final examsJson = user.userExams.map((e) => e.toJson()).toList();
+      await _store.putJson(LocalStore.myExamsKey, examsJson);
+    }
+
+    final dashData = _store.getJson(LocalStore.dashboardKey);
+    if (dashData != null) {
+      await _applyUserToCache(user);
+      return;
+    }
+
+    await _store.putJson(LocalStore.dashboardKey, {
+      'user': user.toJson(),
+      'myExams': user.userExams.map((e) => e.toJson()).toList(),
+      'subjectProgress': const <dynamic>[],
+      'weeklyLogs': const <dynamic>[],
+      'totalTopics': 0,
+      'completedTopics': 0,
+      'remainingTopics': 0,
+      'overallCompletionPercent': 0.0,
+      'totalEstimatedHours': 0.0,
+      'todayHours': 0.0,
+      'todayTopicsCompleted': 0,
+      'studyStreakDays': user.studyStreakDays,
+    });
   }
 
   Future<void> _queueActiveExamChange(int userExamId) async {
@@ -1356,8 +1164,13 @@ class DashboardRepository {
   }
 
   Future<UserModel> deleteMyExam(int userExamId) async {
-    final response = await _client.dio.delete(ApiEndpoints.deleteMyExam(userExamId));
-    return UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
+    ApiCallTracker.instance.record('DELETE my-exam $userExamId');
+    final response =
+        await _client.dio.delete(ApiEndpoints.deleteMyExam(userExamId));
+    final user =
+        UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
+    await _applyUserToCache(user);
+    return user;
   }
 
   Future<List<ExamModel>> getExamsCached() async {
@@ -1414,26 +1227,6 @@ class DashboardRepository {
     };
     final response = await _client.dio.post(ApiEndpoints.examGoal, data: body);
     return UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
-  }
-
-  Future<void> updateStudyHours(double dailyTargetHours) async {
-    ApiCallTracker.instance.record('PATCH ${ApiEndpoints.studyHours}');
-    await _client.dio.patch(
-      ApiEndpoints.studyHours,
-      data: {'dailyTargetHours': dailyTargetHours},
-    );
-  }
-
-  Future<void> updateStudyHoursLocal(double dailyTargetHours) async {
-    final data = _store.getJson(LocalStore.dashboardKey);
-    if (data == null) return;
-    final user = data['user'];
-    if (user is Map<String, dynamic>) {
-      user['dailyTargetHours'] = dailyTargetHours;
-      user['weeklyTargetHours'] = (dailyTargetHours * 7 * 10).round() / 10.0;
-      await _store.putJson(LocalStore.dashboardKey, data);
-      await _store.putJson(LocalStore.userProfileKey, user);
-    }
   }
 
   Future<List<SubjectModel>> getSubjectsByExam(int examId) async {

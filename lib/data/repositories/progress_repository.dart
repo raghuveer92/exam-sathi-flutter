@@ -269,22 +269,229 @@ class ProgressRepository {
   }
 
   /// Queue-only write — synced when user taps SYNC.
-  Future<void> markTopicComplete({
+  Future<void> enqueueTopicCompletion({
     required int userExamId,
     required int topicId,
     required bool isCompleted,
-    double actualHours = 0.0,
+    required double actualHours,
   }) async {
     await _offlineQueue.enqueue(
       entityType: 'TOPIC',
-      entityId: '$userExamId-$topicId',
-      action: isCompleted ? 'COMPLETE_TOPIC' : 'ADD_STUDY_HOURS',
+      entityId: '$userExamId-$topicId-complete',
+      action: 'COMPLETE_TOPIC',
       payload: {
         'userExamId': userExamId,
         'topicId': topicId,
         'isCompleted': isCompleted,
         'actualHours': actualHours,
       },
+    );
+  }
+
+  /// Queue-only write — synced when user taps SYNC.
+  Future<void> enqueueTopicStudyHours({
+    required int userExamId,
+    required int topicId,
+    required bool isCompleted,
+    required double actualHours,
+  }) async {
+    await _offlineQueue.enqueue(
+      entityType: 'TOPIC',
+      entityId: '$userExamId-$topicId-hours-${_uuid.v4()}',
+      action: 'ADD_STUDY_HOURS',
+      payload: {
+        'userExamId': userExamId,
+        'topicId': topicId,
+        'isCompleted': isCompleted,
+        'actualHours': actualHours,
+      },
+    );
+  }
+
+  /// Mark selected topics completed and optionally log study hours (0h allowed).
+  Future<int> bulkCompleteSelectedTopics({
+    required int userExamId,
+    required int subjectId,
+    required List<TopicModel> topics,
+    required double totalStudyHours,
+    String? studyDate,
+  }) async {
+    if (topics.isEmpty) return 0;
+
+    final date = studyDate ?? _localTodayDate();
+    final count = topics.length;
+    var newlyCompleted = 0;
+    final baseShare = totalStudyHours > 0
+        ? (totalStudyHours / count * 10).floor() / 10.0
+        : 0.0;
+    var assigned = 0.0;
+
+    for (var i = 0; i < count; i++) {
+      final topic = topics[i];
+      final wasCompleted = topic.isCompleted;
+      if (!wasCompleted) newlyCompleted++;
+
+      var share = 0.0;
+      if (totalStudyHours > 0) {
+        share = i == count - 1
+            ? ((totalStudyHours - assigned) * 10).round() / 10.0
+            : baseShare;
+        assigned += share;
+      }
+
+      await _persistLocally(
+        userExamId: userExamId,
+        subjectId: subjectId,
+        topicId: topic.id,
+        wasCompleted: wasCompleted,
+        isCompleted: true,
+        actualHours: topic.actualHours + share,
+        studyHoursDelta: share > 0 ? share : null,
+        studyDate: date,
+        recordDailyLog: false,
+        enqueueHoursSync: share > 0,
+        rebuildProgress: false,
+      );
+    }
+
+    if (newlyCompleted > 0 || totalStudyHours > 0) {
+      await _writeDailyStudyLogRecord(
+        studyDate: date,
+        hoursDelta: totalStudyHours,
+        topicsDelta: newlyCompleted,
+        syncStatus: LocalTables.syncStatusPending,
+      );
+      await logStudyHours(
+        studyDate: date,
+        hoursStudied: totalStudyHours,
+        topicsCompleted: newlyCompleted,
+      );
+    }
+
+    await _rebuildAfterBulk(userExamId);
+    return newlyCompleted;
+  }
+
+  /// Mark one or many topics completed — no study hours required.
+  Future<int> bulkMarkTopicsCompleted({
+    required int userExamId,
+    required int subjectId,
+    required List<TopicModel> topics,
+    String? studyDate,
+  }) async {
+    final date = studyDate ?? _localTodayDate();
+    var newlyCompleted = 0;
+
+    for (final topic in topics) {
+      if (topic.isCompleted) continue;
+      newlyCompleted++;
+      await _persistLocally(
+        userExamId: userExamId,
+        subjectId: subjectId,
+        topicId: topic.id,
+        wasCompleted: false,
+        isCompleted: true,
+        actualHours: topic.actualHours,
+        studyHoursDelta: null,
+        studyDate: date,
+        recordDailyLog: false,
+        rebuildProgress: false,
+      );
+    }
+
+    if (newlyCompleted > 0) {
+      await _writeDailyStudyLogRecord(
+        studyDate: date,
+        hoursDelta: 0,
+        topicsDelta: newlyCompleted,
+        syncStatus: LocalTables.syncStatusPending,
+      );
+      await logStudyHours(
+        studyDate: date,
+        hoursStudied: 0,
+        topicsCompleted: newlyCompleted,
+      );
+    }
+
+    await _rebuildAfterBulk(userExamId);
+    return newlyCompleted;
+  }
+
+  /// Distribute [totalHours] equally across [topics] (adds to each topic).
+  Future<void> bulkAddStudyHours({
+    required int userExamId,
+    required int subjectId,
+    required List<TopicModel> topics,
+    required double totalHours,
+    String? studyDate,
+  }) async {
+    if (topics.isEmpty || totalHours <= 0) return;
+
+    final date = studyDate ?? _localTodayDate();
+    final count = topics.length;
+    final baseShare = (totalHours / count * 10).floor() / 10.0;
+    var assigned = 0.0;
+
+    for (var i = 0; i < count; i++) {
+      final topic = topics[i];
+      final share = i == count - 1
+          ? ((totalHours - assigned) * 10).round() / 10.0
+          : baseShare;
+      assigned += share;
+      final newHours = topic.actualHours + share;
+
+      await _persistLocally(
+        userExamId: userExamId,
+        subjectId: subjectId,
+        topicId: topic.id,
+        wasCompleted: topic.isCompleted,
+        isCompleted: topic.isCompleted,
+        actualHours: newHours,
+        studyHoursDelta: share,
+        studyDate: date,
+        recordDailyLog: false,
+        enqueueHoursSync: true,
+        rebuildProgress: false,
+      );
+    }
+
+    await _writeDailyStudyLogRecord(
+      studyDate: date,
+      hoursDelta: totalHours,
+      topicsDelta: 0,
+      syncStatus: LocalTables.syncStatusPending,
+    );
+    await logStudyHours(
+      studyDate: date,
+      hoursStudied: totalHours,
+      topicsCompleted: 0,
+    );
+
+    await _rebuildAfterBulk(userExamId);
+  }
+
+  Future<void> _rebuildAfterBulk(int userExamId) async {
+    final userExam = await _dashboardRepository.resolveUserExamById(userExamId);
+    if (userExam != null) {
+      await _progressRebuildService.rebuildExam(
+        userExam.examId,
+        userExamId: userExamId,
+      );
+    }
+  }
+
+  /// @deprecated Use [enqueueTopicCompletion] / [enqueueTopicStudyHours].
+  Future<void> markTopicComplete({
+    required int userExamId,
+    required int topicId,
+    required bool isCompleted,
+    double actualHours = 0.0,
+  }) async {
+    await enqueueTopicCompletion(
+      userExamId: userExamId,
+      topicId: topicId,
+      isCompleted: isCompleted,
+      actualHours: actualHours,
     );
   }
 
@@ -512,6 +719,10 @@ class ProgressRepository {
     required double actualHours,
     double? studyHoursDelta,
     String? studyDate,
+    bool recordDailyLog = true,
+    bool enqueueHoursSync = true,
+    bool enqueueCompletionSync = true,
+    bool rebuildProgress = true,
   }) async {
     final detail = await patchTopicInCache(
       userExamId: userExamId,
@@ -519,19 +730,36 @@ class ProgressRepository {
       topicId: topicId,
       actualHours: actualHours,
       isCompleted: isCompleted,
-      status: isCompleted ? 'COMPLETED' : (actualHours > 0 ? 'IN_PROGRESS' : null),
+      status: isCompleted
+          ? 'COMPLETED'
+          : (actualHours > 0 ? 'IN_PROGRESS' : 'NOT_STARTED'),
     );
     if (detail == null) return;
 
     final userExam = await _dashboardRepository.resolveUserExamById(userExamId);
     final examId = userExam?.examId;
 
-    await markTopicComplete(
-      userExamId: userExamId,
-      topicId: topicId,
-      isCompleted: isCompleted,
-      actualHours: actualHours,
-    );
+    final completionChanged = isCompleted != wasCompleted;
+    if (enqueueCompletionSync && completionChanged) {
+      await enqueueTopicCompletion(
+        userExamId: userExamId,
+        topicId: topicId,
+        isCompleted: isCompleted,
+        actualHours: actualHours,
+      );
+    }
+
+    if (enqueueHoursSync &&
+        studyHoursDelta != null &&
+        studyHoursDelta != 0) {
+      await enqueueTopicStudyHours(
+        userExamId: userExamId,
+        topicId: topicId,
+        isCompleted: isCompleted,
+        actualHours: actualHours,
+      );
+    }
+
     await _writeTopicProgressRecord(
       userExamId: userExamId,
       examId: examId,
@@ -541,7 +769,11 @@ class ProgressRepository {
       actualHours: actualHours,
       syncStatus: LocalTables.syncStatusPending,
     );
-    if (studyHoursDelta != null && studyHoursDelta != 0 && studyDate != null) {
+
+    if (recordDailyLog &&
+        studyHoursDelta != null &&
+        studyHoursDelta != 0 &&
+        studyDate != null) {
       await logStudyHours(
         studyDate: studyDate,
         hoursStudied: studyHoursDelta,
@@ -563,7 +795,7 @@ class ProgressRepository {
       studyDate: studyDate ?? _localTodayDate(),
     );
 
-    if (userExam != null) {
+    if (rebuildProgress && userExam != null) {
       await _progressRebuildService.rebuildExam(
         userExam.examId,
         userExamId: userExamId,

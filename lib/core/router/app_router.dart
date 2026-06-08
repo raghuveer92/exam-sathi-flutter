@@ -134,7 +134,11 @@ class AppRouter {
       GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
       GoRoute(
         path: '/offline-setup',
-        builder: (_, __) => const OfflineSetupScreen(),
+        builder: (_, state) => OfflineSetupScreen(
+          redirectPath: state.uri.queryParameters['redirect'] ?? '/home',
+          title: state.uri.queryParameters['title'] ??
+              'Preparing Offline Content',
+        ),
       ),
       GoRoute(
         path: '/select-exam',

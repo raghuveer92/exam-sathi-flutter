@@ -7,8 +7,13 @@ import '../../../data/models/dashboard_model.dart';
 /// Dashboard hero card — matches reference layout (Overall Progress + Daily Target).
 class OverallProgressCard extends StatelessWidget {
   final DashboardModel dashboard;
+  final double dailyTargetHours;
 
-  const OverallProgressCard({super.key, required this.dashboard});
+  const OverallProgressCard({
+    super.key,
+    required this.dashboard,
+    required this.dailyTargetHours,
+  });
 
   static const Color _purple = Color(0xFF6366F1);
   static const Color _purpleLight = Color(0xFFEEF2FF);
@@ -28,7 +33,7 @@ class OverallProgressCard extends StatelessWidget {
         total == 0 ? 0.0 : (completed * 100.0 / total).clamp(0.0, 100.0);
     final overallRatio = overallPercent / 100;
 
-    final dailyTarget = dashboard.effectiveDailyTargetHours;
+    final dailyTarget = dailyTargetHours;
     final todayStudied = dashboard.todayHours;
     final hasDailyTarget = dailyTarget > 0;
     final goalAchieved = hasDailyTarget && todayStudied >= dailyTarget;

@@ -157,8 +157,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
               builder: (context, constraints) {
                 final isTwoColumn = constraints.maxWidth >= 960;
                 final content = isTwoColumn
-                    ? _buildTwoColumnDashboard(context, dashboard, exams)
-                    : _buildSingleColumnDashboard(context, dashboard, exams);
+                    ? _buildTwoColumnDashboard(
+                        context,
+                        dashboard,
+                        exams,
+                        loaded.calculatedDailyTarget,
+                      )
+                    : _buildSingleColumnDashboard(
+                        context,
+                        dashboard,
+                        exams,
+                        loaded.calculatedDailyTarget,
+                      );
 
                 return SingleChildScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
@@ -182,6 +192,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     BuildContext context,
     DashboardModel dashboard,
     List<UserExamModel> exams,
+    double dailyTargetHours,
   ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -191,7 +202,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           firstName: dashboard.user.firstName,
         ),
         const SizedBox(height: 18),
-        OverallProgressCard(dashboard: dashboard),
+        OverallProgressCard(
+          dashboard: dashboard,
+          dailyTargetHours: dailyTargetHours,
+        ),
         const SizedBox(height: 18),
         _MyExamsSection(
           exams: exams,
@@ -214,6 +228,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     BuildContext context,
     DashboardModel dashboard,
     List<UserExamModel> exams,
+    double dailyTargetHours,
   ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -229,7 +244,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Expanded(
               child: Column(
                 children: [
-                  OverallProgressCard(dashboard: dashboard),
+                  OverallProgressCard(
+          dashboard: dashboard,
+          dailyTargetHours: dailyTargetHours,
+        ),
                   const SizedBox(height: 18),
                   _MyExamsSection(
                     exams: exams,

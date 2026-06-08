@@ -1,10 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/firebase/analytics_service.dart';
@@ -51,14 +48,6 @@ String _localTodayDate() {
       '${now.day.toString().padLeft(2, '0')}';
 }
 
-/// Parses a backend timestamp to local DateTime.
-/// Spring Boot LocalDateTime serialises as "2026-05-22T17:00:00.000" — no Z,
-/// but the value is UTC.  Append Z so Dart treats it as UTC before converting.
-DateTime _parseBackendTimestamp(String s) {
-  final isExplicit = s.endsWith('Z') || RegExp(r'[+-]\d{2}:\d{2}$').hasMatch(s);
-  return DateTime.parse(isExplicit ? s : '${s}Z').toLocal();
-}
-
 // ─── Screen ────────────────────────────────────────────────────────────────
 class SubjectDetailScreen extends StatefulWidget {
   final int subjectId;
@@ -78,9 +67,11 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
   SubjectDetailModel? _detail;
   bool _loading = true;
   String? _error;
-  int? _savingTopicId;
+  bool _bulkSaving = false;
+  bool _selectionMode = false;
+  final Set<int> _selectedTopicIds = {};
+  double _selectionStudyHours = 0;
   _TopicFilter _topicFilter = _TopicFilter.all;
-  final Map<int, double> _localHoursMap = {};
 
   List<TopicModel> get _allTopics {
     if (_detail == null) return [];
@@ -109,49 +100,132 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     }).toList();
   }
 
-  double _topicHours(TopicModel topic) =>
-      _localHoursMap[topic.id] ?? topic.actualHours;
-
   double get _localTotalHours {
     if (_detail == null) return 0;
     double total = 0;
     for (final ch in _detail!.chapters) {
       for (final t in ch.topics) {
-        total += _localHoursMap[t.id] ?? t.actualHours;
+        total += t.actualHours;
       }
     }
     return total;
   }
 
-  void _onLocalHoursChanged(int topicId, double hours) {
-    setState(() => _localHoursMap[topicId] = hours);
+  List<TopicModel> get _selectedTopics => _filteredTopics
+      .where((topic) => _selectedTopicIds.contains(topic.id))
+      .toList();
+
+  void _enterSelectionMode([TopicModel? initial]) {
+    setState(() {
+      _selectionMode = true;
+      _selectedTopicIds.clear();
+      if (initial != null) _selectedTopicIds.add(initial.id);
+    });
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selectedTopicIds.clear();
+      _selectionStudyHours = 0;
+    });
+  }
+
+  void _toggleTopicSelection(TopicModel topic) {
+    setState(() {
+      if (_selectedTopicIds.contains(topic.id)) {
+        _selectedTopicIds.remove(topic.id);
+        if (_selectedTopicIds.isEmpty) _selectionMode = false;
+      } else {
+        _selectedTopicIds.add(topic.id);
+      }
+    });
+  }
+
+  void _onTopicTap(TopicModel topic) {
+    if (_selectionMode) {
+      _toggleTopicSelection(topic);
+      return;
+    }
+    if (_statusOf(topic) == _TopicStatus.completed) {
+      _showCompletedTopicSheet(topic);
+      return;
+    }
+    _enterSelectionMode(topic);
+  }
+
+  void _onTopicLongPress(TopicModel topic) {
+    if (!_selectionMode) {
+      _enterSelectionMode(topic);
+    } else {
+      _toggleTopicSelection(topic);
+    }
+  }
+
+  Future<void> _bulkMarkCompleted() async {
+    final topics = _selectedTopics;
+    if (topics.isEmpty) return;
+
+    final alreadyDone = topics.every((topic) => topic.isCompleted);
+    if (alreadyDone && _selectionStudyHours <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Selected topics are already completed'),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _bulkSaving = true);
+    final loggedHours = _selectionStudyHours;
+    try {
+      final count =
+          await GetIt.I<ProgressRepository>().bulkCompleteSelectedTopics(
+        userExamId: widget.userExamId,
+        subjectId: widget.subjectId,
+        topics: topics,
+        totalStudyHours: loggedHours,
+        studyDate: _localTodayDate(),
+      );
+      await _load(silent: true);
+      _exitSelectionMode();
+      if (!mounted) return;
+
+      final hoursPart =
+          loggedHours > 0 ? ' · ${_fmtH(loggedHours)} logged' : '';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            count > 0
+                ? '$count topic${count == 1 ? '' : 's'} marked completed$hoursPart'
+                : 'Study hours updated$hoursPart',
+          ),
+        ),
+      );
+      context.read<DashboardBloc>().add(DashboardRefreshRequested());
+    } finally {
+      if (mounted) setState(() => _bulkSaving = false);
+    }
+  }
+
+  void _showCompletedTopicSheet(TopicModel topic) {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => _CompletedTopicSheet(
+        topic: topic,
+        subjectColor: _detail!.color,
+      ),
+    );
   }
 
   @override
   void initState() {
     super.initState();
     _load();
-  }
-
-  Future<void> _applyLocalTopicUpdate({
-    required TopicModel topic,
-    required double hours,
-    required bool isCompleted,
-  }) async {
-    final repo = GetIt.I<ProgressRepository>();
-    final updated = await repo.patchTopicInCache(
-      userExamId: widget.userExamId,
-      subjectId: widget.subjectId,
-      topicId: topic.id,
-      actualHours: hours,
-      isCompleted: isCompleted,
-      status: isCompleted ? 'COMPLETED' : (hours > 0 ? 'IN_PROGRESS' : topic.status),
-    );
-    if (!mounted || updated == null) return;
-    setState(() {
-      _detail = updated;
-      _localHoursMap[topic.id] = hours;
-    });
   }
 
   Future<void> _load({bool silent = false}) async {
@@ -166,7 +240,6 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
       setState(() {
         _detail = detail;
         _loading = false;
-        _localHoursMap.clear();
         _error = null;
       });
       AnalyticsService.logSubjectOpened(
@@ -180,79 +253,6 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
         _loading = false;
       });
     }
-  }
-
-  Future<void> _onTopicComplete(TopicModel topic, double hours) async {
-    final prevHours = topic.actualHours;
-    final delta = hours - prevHours;
-
-    await _applyLocalTopicUpdate(
-      topic: topic,
-      hours: hours,
-      isCompleted: true,
-    );
-    if (!mounted) return;
-
-    _showSuccessDialog(topic.title, hours);
-
-    await GetIt.I<ProgressRepository>().persistTopicProgress(
-      userExamId: widget.userExamId,
-      subjectId: widget.subjectId,
-      topicId: topic.id,
-      wasCompleted: topic.isCompleted,
-      isCompleted: true,
-      actualHours: hours,
-      studyHoursDelta: delta != 0 ? delta : null,
-      studyDate: _localTodayDate(),
-    );
-    if (mounted) {
-      context.read<DashboardBloc>().add(DashboardRefreshRequested());
-    }
-
-    AnalyticsService.logTopicCompleted(
-      topicId: topic.id,
-      topicName: topic.title,
-      subjectName: _detail?.subjectName ?? '',
-      actualHours: hours,
-    );
-  }
-
-  Future<void> _onHoursUpdated(TopicModel topic, double hours) async {
-    if (hours == topic.actualHours) return;
-    final delta = hours - topic.actualHours;
-
-    await _applyLocalTopicUpdate(
-      topic: topic,
-      hours: hours,
-      isCompleted: topic.isCompleted,
-    );
-    if (!mounted) return;
-
-    await GetIt.I<ProgressRepository>().persistTopicProgress(
-      userExamId: widget.userExamId,
-      subjectId: widget.subjectId,
-      topicId: topic.id,
-      wasCompleted: topic.isCompleted,
-      isCompleted: topic.isCompleted,
-      actualHours: hours,
-      studyHoursDelta: delta != 0 ? delta : null,
-      studyDate: _localTodayDate(),
-    );
-    if (mounted) {
-      context.read<DashboardBloc>().add(DashboardRefreshRequested());
-    }
-
-    AnalyticsService.logStudyHoursAdded(
-      hours: hours,
-      subjectName: _detail?.subjectName ?? '',
-    );
-  }
-
-  void _showSuccessDialog(String title, double hours) {
-    showDialog(
-      context: context,
-      builder: (_) => _SuccessDialog(topicTitle: title, hours: hours),
-    );
   }
 
   @override
@@ -303,7 +303,9 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
         elevation: 0,
         surfaceTintColor: Colors.white,
         title: Text(
-          d.subjectName,
+          _selectionMode
+              ? '${_selectedTopicIds.length} selected'
+              : d.subjectName,
           style: const TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 18,
@@ -312,16 +314,48 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
         ),
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-          onPressed: () => Navigator.of(context).maybePop(),
+          icon: Icon(
+            _selectionMode
+                ? Icons.close_rounded
+                : Icons.arrow_back_ios_new_rounded,
+            size: 20,
+          ),
+          onPressed: () {
+            if (_selectionMode) {
+              _exitSelectionMode();
+            } else {
+              Navigator.of(context).maybePop();
+            }
+          },
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.more_vert_rounded),
-            onPressed: () {},
-          ),
+          if (!_selectionMode)
+            IconButton(
+              icon: const Icon(Icons.checklist_rounded),
+              tooltip: 'Select topics',
+              onPressed: () => _enterSelectionMode(),
+            ),
         ],
       ),
+      bottomNavigationBar: _selectedTopicIds.isNotEmpty
+          ? _TopicSelectionPanel(
+              selectedCount: _selectedTopicIds.length,
+              studyHours: _selectionStudyHours,
+              isSaving: _bulkSaving,
+              subjectColor: color,
+              onDecrement: () {
+                if (_selectionStudyHours <= 0) return;
+                setState(() =>
+                    _selectionStudyHours = (_selectionStudyHours - 1.0)
+                        .clamp(0.0, 999.0));
+              },
+              onIncrement: () => setState(
+                () => _selectionStudyHours = (_selectionStudyHours + 1.0)
+                    .clamp(0.0, 999.0),
+              ),
+              onMarkCompleted: _bulkMarkCompleted,
+            )
+          : null,
       body: Center(
         child: ConstrainedBox(
           constraints: BoxConstraints(
@@ -378,22 +412,26 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
                 ),
               ),
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  0,
+                  16,
+                  _selectedTopicIds.isNotEmpty ? 200 : 80,
+                ),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (ctx, i) {
                       final topic = _filteredTopics[i];
                       return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.only(bottom: 6),
                         child: _TopicTile(
                           key: ValueKey(topic.id),
                           topic: topic,
                           subjectColor: color,
-                          localHours: _topicHours(topic),
-                          isSaving: _savingTopicId == topic.id,
-                          onTopicComplete: _onTopicComplete,
-                          onHoursUpdated: _onHoursUpdated,
-                          onLocalHoursChanged: _onLocalHoursChanged,
+                          selectionMode: _selectionMode,
+                          isSelected: _selectedTopicIds.contains(topic.id),
+                          onTap: () => _onTopicTap(topic),
+                          onLongPress: () => _onTopicLongPress(topic),
                         ),
                       );
                     },
@@ -644,43 +682,382 @@ class _StatCard extends StatelessWidget {
   }
 }
 
+
 // ─── Topic Tile ──────────────────────────────────────────────────────────────
-class _TopicTile extends StatefulWidget {
+class _TopicTile extends StatelessWidget {
   final TopicModel topic;
   final Color subjectColor;
-  final double localHours;
-  final bool isSaving;
-  final Future<void> Function(TopicModel, double) onTopicComplete;
-  final Future<void> Function(TopicModel, double) onHoursUpdated;
-  final void Function(int topicId, double hours) onLocalHoursChanged;
+  final bool selectionMode;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   const _TopicTile({
     super.key,
     required this.topic,
     required this.subjectColor,
-    required this.localHours,
+    required this.selectionMode,
+    required this.isSelected,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  double get _studyProgress {
+    if (topic.isCompleted || topic.status == 'COMPLETED') return 1.0;
+    if (topic.estimatedHours <= 0) return 0.0;
+    return (topic.actualHours / topic.estimatedHours).clamp(0.0, 1.0);
+  }
+
+  String get _metaLine {
+    final est = _fmtH(topic.estimatedHours);
+    final studied = _fmtH(topic.actualHours);
+    final pct = (_studyProgress * 100).round();
+    return '$est est. • $studied studied • $pct%';
+  }
+
+  Widget _leadingIcon(_TopicStatus status) {
+    if (selectionMode) {
+      return SizedBox(
+        width: 22,
+        height: 22,
+        child: Checkbox(
+          value: isSelected,
+          onChanged: (_) => onTap(),
+          activeColor: subjectColor,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          visualDensity: VisualDensity.compact,
+        ),
+      );
+    }
+    if (status == _TopicStatus.completed) {
+      return const Icon(
+        Icons.check_circle_rounded,
+        color: Color(0xFF43A047),
+        size: 20,
+      );
+    }
+    return Container(
+      width: 20,
+      height: 20,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.grey.shade400, width: 1.5),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final status = _statusOf(topic);
+
+    return Material(
+      color: isSelected ? subjectColor.withValues(alpha: 0.06) : Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Container(
+          height: 76,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: isSelected ? subjectColor : const Color(0xFFE8EBF0),
+              width: isSelected ? 1.5 : 1,
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Row(
+                children: [
+                  _leadingIcon(status),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      topic.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    selectionMode
+                        ? (isSelected
+                            ? Icons.check_circle_rounded
+                            : Icons.radio_button_unchecked_rounded)
+                        : Icons.chevron_right_rounded,
+                    size: 22,
+                    color: isSelected ? subjectColor : Colors.grey.shade400,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Padding(
+                padding: const EdgeInsets.only(left: 32),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.schedule_rounded,
+                      size: 13,
+                      color: Colors.grey.shade500,
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        _metaLine,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                          height: 1.2,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TopicSelectionPanel extends StatelessWidget {
+  static const _barHeight = 56.0;
+  static const _ctaHeight = 46.0;
+  static const _stepperMaxWidth = 132.0;
+
+  final int selectedCount;
+  final double studyHours;
+  final bool isSaving;
+  final Color subjectColor;
+  final VoidCallback onDecrement;
+  final VoidCallback onIncrement;
+  final VoidCallback onMarkCompleted;
+
+  const _TopicSelectionPanel({
+    required this.selectedCount,
+    required this.studyHours,
     required this.isSaving,
-    required this.onTopicComplete,
-    required this.onHoursUpdated,
-    required this.onLocalHoursChanged,
+    required this.subjectColor,
+    required this.onDecrement,
+    required this.onIncrement,
+    required this.onMarkCompleted,
   });
 
   @override
-  State<_TopicTile> createState() => _TopicTileState();
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: const Border(
+          top: BorderSide(color: AppColors.divider, width: 1),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        minimum: EdgeInsets.zero,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 380;
+            final horizontalPad = compact ? 10.0 : 12.0;
+            final stepperWidth = compact ? 118.0 : _stepperMaxWidth;
+            final dividerGap = compact ? 8.0 : 10.0;
+            final countStyle = TextStyle(
+              fontSize: compact ? 15 : 17,
+              fontWeight: FontWeight.w500,
+              color: AppColors.textPrimary,
+              letterSpacing: -0.2,
+            );
+
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                horizontalPad,
+                8,
+                horizontalPad,
+                8,
+              ),
+              child: SizedBox(
+                height: _barHeight,
+                child: Row(
+                  children: [
+                    Flexible(
+                      flex: 0,
+                      child: Text(
+                        '$selectedCount Selected',
+                        style: countStyle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    _SectionDivider(gap: dividerGap),
+                    SizedBox(
+                      width: stepperWidth,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _HourStepButton(
+                            icon: Icons.remove_rounded,
+                            enabled: !isSaving && studyHours > 0,
+                            onTap: onDecrement,
+                          ),
+                          SizedBox(
+                            width: compact ? 36 : 44,
+                            child: Text(
+                              _fmtH(studyHours),
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: compact ? 15 : 16,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                          ),
+                          _HourStepButton(
+                            icon: Icons.add_rounded,
+                            enabled: !isSaving,
+                            onTap: onIncrement,
+                          ),
+                        ],
+                      ),
+                    ),
+                    _SectionDivider(gap: dividerGap),
+                    Expanded(
+                      child: SizedBox(
+                        height: _ctaHeight,
+                        child: FilledButton(
+                          onPressed: isSaving ? null : onMarkCompleted,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.success,
+                            disabledBackgroundColor:
+                                AppColors.success.withValues(alpha: 0.45),
+                            elevation: 0,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: compact ? 8 : 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: isSaving
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Text(
+                                  'Mark Completed',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: compact ? 14 : 15,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: -0.1,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
 }
 
-class _TopicTileState extends State<_TopicTile> {
-  double _localHours = 0;
-  bool _showStepper = false;
-  Timer? _debounce;
+class _SectionDivider extends StatelessWidget {
+  final double gap;
+
+  const _SectionDivider({this.gap = 10});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 1,
+      height: 28,
+      margin: EdgeInsets.symmetric(horizontal: gap),
+      color: AppColors.divider,
+    );
+  }
+}
+
+class _HourStepButton extends StatelessWidget {
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _HourStepButton({
+    required this.icon,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: enabled ? const Color(0xFFF3F4F6) : const Color(0xFFFAFAFA),
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(10),
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: Icon(
+            icon,
+            size: 18,
+            color: enabled ? AppColors.textPrimary : AppColors.textHint,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CompletedTopicSheet extends StatefulWidget {
+  final TopicModel topic;
+  final Color subjectColor;
+
+  const _CompletedTopicSheet({
+    required this.topic,
+    required this.subjectColor,
+  });
+
+  @override
+  State<_CompletedTopicSheet> createState() => _CompletedTopicSheetState();
+}
+
+class _CompletedTopicSheetState extends State<_CompletedTopicSheet> {
   MockTestInfoModel? _mockTestInfo;
   bool _loadingMockTest = true;
 
   @override
   void initState() {
     super.initState();
-    _localHours = widget.localHours;
-    _showStepper = _statusOf(widget.topic) == _TopicStatus.inProgress;
     _loadMockTestInfo();
   }
 
@@ -702,614 +1079,69 @@ class _TopicTileState extends State<_TopicTile> {
   }
 
   @override
-  void dispose() {
-    _debounce?.cancel();
-    super.dispose();
-  }
-
-  @override
-  void didUpdateWidget(_TopicTile old) {
-    super.didUpdateWidget(old);
-    if (old.topic.actualHours != widget.topic.actualHours ||
-        old.topic.isCompleted != widget.topic.isCompleted ||
-        old.localHours != widget.localHours) {
-      _localHours = widget.localHours;
-      _showStepper = _statusOf(widget.topic) == _TopicStatus.inProgress;
-    }
-  }
-
-  Color get _diffColor {
-    switch (widget.topic.difficultyLevel) {
-      case 'EASY':
-        return const Color(0xFF43A047);
-      case 'HARD':
-        return const Color(0xFFE53935);
-      default:
-        return const Color(0xFFFF6B35);
-    }
-  }
-
-  void _inc() {
-    setState(() => _localHours = (_localHours + 0.5).clamp(0.0, 999.0));
-    widget.onLocalHoursChanged(widget.topic.id, _localHours);
-    _scheduleHoursSave();
-  }
-
-  void _dec() {
-    if (_localHours > 0.5) {
-      setState(() => _localHours -= 0.5);
-      widget.onLocalHoursChanged(widget.topic.id, _localHours);
-      _scheduleHoursSave();
-    }
-  }
-
-  void _scheduleHoursSave() {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 600), () async {
-      if (!mounted) return;
-      await widget.onHoursUpdated(widget.topic, _localHours);
-    });
-  }
-
-  Future<void> _onAddStudyHours() async {
-    setState(() {
-      _showStepper = true;
-      if (_localHours < 0.5) _localHours = 0.5;
-    });
-    widget.onLocalHoursChanged(widget.topic.id, _localHours);
-    if (_localHours != widget.topic.actualHours) {
-      _scheduleHoursSave();
-    }
-  }
-
-  void _showConfirm() {
-    showDialog(
-      context: context,
-      builder: (ctx) => Dialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: widget.subjectColor.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(Icons.assignment_turned_in_outlined,
-                    color: widget.subjectColor, size: 38),
-              ),
-              const SizedBox(height: 18),
-              const Text('Mark as Completed?',
-                  style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
-              const SizedBox(height: 12),
-              Text(
-                'You have logged ${_fmtH(_localHours)} for this topic.\n\nAre you sure you want to mark this topic as completed?',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 13,
-                    color: AppColors.textSecondary,
-                    height: 1.6),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                        side: const BorderSide(
-                            color: AppColors.textHint),
-                      ),
-                      onPressed: () => Navigator.of(ctx).pop(),
-                      child: const Text('Cancel',
-                          style: TextStyle(
-                              color: AppColors.textSecondary,
-                              fontWeight: FontWeight.w600)),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: widget.subjectColor,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                      ),
-                      onPressed: () {
-                        Navigator.of(ctx).pop();
-                        widget.onTopicComplete(
-                            widget.topic, _localHours);
-                      },
-                      child: const Text('Yes, Complete',
-                          style: TextStyle(fontWeight: FontWeight.w700)),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  double get _topicProgress {
-    final status =
-        _showStepper ? _TopicStatus.inProgress : _statusOf(widget.topic);
-    return switch (status) {
-      _TopicStatus.completed => 1.0,
-      _TopicStatus.inProgress => widget.topic.estimatedHours > 0
-          ? (_localHours / widget.topic.estimatedHours).clamp(0.0, 1.0)
-          : 0.5,
-      _TopicStatus.notStarted => 0.0,
-    };
-  }
-
-  String get _statusText {
-    final status =
-        _showStepper ? _TopicStatus.inProgress : _statusOf(widget.topic);
-    return switch (status) {
-      _TopicStatus.completed =>
-        'Completed • ${_fmtDuration(widget.topic.actualHours)} studied',
-      _TopicStatus.inProgress =>
-        '${(_topicProgress * 100).round()}% completed • ${_fmtDuration(_localHours)} studied',
-      _TopicStatus.notStarted => '0% completed',
-    };
-  }
-
-  Widget _compactAddHoursButton() {
-    return OutlinedButton.icon(
-      onPressed: widget.isSaving ? null : _onAddStudyHours,
-      icon: Icon(Icons.add_rounded, size: 16, color: widget.subjectColor),
-      label: Text(
-        'Add Hours',
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: widget.subjectColor,
-        ),
-      ),
-      style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        side: BorderSide(color: widget.subjectColor.withValues(alpha: 0.35)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
-  }
-
-  Widget _hoursStepperSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Hours Studied',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textSecondary,
-          ),
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            _stepBtn(Icons.remove_rounded, _localHours > 0.5 ? _dec : null),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: widget.subjectColor.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: widget.subjectColor.withValues(alpha: 0.2),
-                  ),
-                ),
-                child: Text(
-                  _fmtH(_localHours),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: widget.subjectColor,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 14),
-            _stepBtn(Icons.add_rounded, _inc),
-          ],
-        ),
-        const SizedBox(height: 12),
-        ElevatedButton.icon(
-          onPressed: widget.isSaving ? null : _showConfirm,
-          icon: widget.isSaving
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : const Icon(Icons.check_circle_outline_rounded, size: 18),
-          label: const Text(
-            'Mark as Completed',
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-          ),
-          style: ElevatedButton.styleFrom(
-            minimumSize: const Size(double.infinity, 46),
-            backgroundColor: widget.subjectColor,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _statusIcon(_TopicStatus status) {
-    if (status == _TopicStatus.completed) {
-      return const Icon(
-        Icons.check_circle_rounded,
-        color: Color(0xFF43A047),
-        size: 24,
-      );
-    }
-    return Container(
-      width: 22,
-      height: 22,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.grey.shade300, width: 2),
-      ),
-    );
-  }
-
-  Widget _compactStartTestButton() {
-    if (_loadingMockTest || _mockTestInfo == null) {
-      return const SizedBox.shrink();
-    }
-
-    final info = _mockTestInfo!;
-    final canStart = info.canStart;
-
-    return FilledButton.icon(
-      onPressed: canStart
-          ? () {
-              final title = Uri.encodeComponent(widget.topic.title);
-              context.push('/mock-test/${widget.topic.id}?title=$title');
-            }
-          : null,
-      icon: const Icon(Icons.quiz_outlined, size: 16),
-      label: Text(canStart ? 'Start Test' : 'Unavailable'),
-      style: FilledButton.styleFrom(
-        backgroundColor: const Color(0xFF43A047),
-        disabledBackgroundColor: Colors.grey.shade300,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-      ),
-    );
-  }
-
-  Widget _actionButtonsRow(_TopicStatus status) {
-    final showAddHours = status == _TopicStatus.notStarted && !_showStepper;
-    if (!showAddHours) {
-      return const SizedBox.shrink();
-    }
-
-    return Align(
-      alignment: Alignment.centerRight,
-      child: _compactAddHoursButton(),
-    );
-  }
-
-  Widget _completedStartTestSection() {
-    if (_loadingMockTest || _mockTestInfo == null) {
-      return const SizedBox.shrink();
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Align(
-          alignment: Alignment.centerRight,
-          child: _compactStartTestButton(),
-        ),
-        if (!_mockTestInfo!.canStart)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Text(
-              'Only ${_mockTestInfo!.availableQuestionCount} of ${_mockTestInfo!.numQuestions} questions available.',
-              style: TextStyle(fontSize: 11, color: Colors.orange.shade800),
-              textAlign: TextAlign.right,
-            ),
-          ),
-      ],
-    );
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final status =
-        _showStepper ? _TopicStatus.inProgress : _statusOf(widget.topic);
+    final studied = _fmtH(widget.topic.actualHours);
+    final est = _fmtH(widget.topic.estimatedHours);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE8EBF0)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: _statusIcon(status),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.topic.title,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      _diffRow(),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: _topicProgress,
-                minHeight: 5,
-                backgroundColor: const Color(0xFFEEF0F5),
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  status == _TopicStatus.completed
-                      ? const Color(0xFF43A047)
-                      : widget.subjectColor,
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              _statusText,
-              style: const TextStyle(
-                fontSize: 12,
-                color: AppColors.textSecondary,
-              ),
-            ),
-            if (status == _TopicStatus.completed &&
-                _completedTimeLabel.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                _completedTimeLabel,
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: AppColors.textHint,
-                ),
-              ),
-            ],
-            if (status != _TopicStatus.completed) ...[
-              const SizedBox(height: 12),
-              _actionButtonsRow(status),
-            ] else ...[
-              const SizedBox(height: 12),
-              _completedStartTestSection(),
-            ],
-            if (_showStepper && status != _TopicStatus.completed) ...[
-              const SizedBox(height: 16),
-              _hoursStepperSection(),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  String get _completedTimeLabel {
-    final completedAt = widget.topic.completedAt;
-    if (completedAt == null || completedAt.isEmpty) return '';
-    try {
-      final dt = _parseBackendTimestamp(completedAt);
-      final now = DateTime.now();
-      final isToday = dt.year == now.year &&
-          dt.month == now.month &&
-          dt.day == now.day;
-      final tf = DateFormat.jm().format(dt);
-      return isToday
-          ? 'Today • $tf'
-          : '${DateFormat('d MMM').format(dt)} • $tf';
-    } catch (_) {
-      return '';
-    }
-  }
-
-  Widget _diffRow() {
-    return Row(
-      children: [
-        Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-          decoration: BoxDecoration(
-            color: _diffColor.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Text(widget.topic.difficultyLevel,
-              style: TextStyle(
-                  fontSize: 10,
-                  color: _diffColor,
-                  fontWeight: FontWeight.w700)),
-        ),
-        const SizedBox(width: 8),
-        const Icon(Icons.schedule_rounded,
-            size: 12, color: AppColors.textHint),
-        const SizedBox(width: 3),
-        Text(
-            '${widget.topic.estimatedHours.toStringAsFixed(0)}h est.',
-            style: const TextStyle(
-                fontSize: 11, color: AppColors.textHint)),
-      ],
-    );
-  }
-
-  Widget _stepBtn(IconData icon, VoidCallback? onTap) {
-    final active = onTap != null;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Container(
-          width: 42,
-          height: 42,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: active
-                ? widget.subjectColor.withOpacity(0.1)
-                : Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: active
-                  ? widget.subjectColor.withOpacity(0.3)
-                  : Colors.grey.shade300,
-            ),
-          ),
-          child: Icon(icon,
-              size: 20,
-              color: active
-                  ? widget.subjectColor
-                  : Colors.grey.shade400),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Success Dialog ──────────────────────────────────────────────────────────
-class _SuccessDialog extends StatelessWidget {
-  final String topicTitle;
-  final double hours;
-  const _SuccessDialog({required this.topicTitle, required this.hours});
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 90,
-                height: 90,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
               decoration: BoxDecoration(
-                color: const Color(0xFF43D854).withOpacity(0.12),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.check_circle_rounded,
-                  color: Color(0xFF43D854), size: 62),
-            ),
-            const SizedBox(height: 20),
-            const Text('Great! Topic Completed',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
-            const SizedBox(height: 12),
-            RichText(
-              textAlign: TextAlign.center,
-              text: TextSpan(
-                style: const TextStyle(
-                    fontSize: 14,
-                    color: AppColors.textSecondary,
-                    height: 1.5),
-                children: [
-                  const TextSpan(text: 'You have completed\n'),
-                  TextSpan(
-                      text: '"$topicTitle"',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary)),
-                  const TextSpan(text: '.'),
-                ],
+                color: const Color(0xFFE5E7EB),
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              '${_fmtH(hours)} of study time saved.',
-              style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF43D854)),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF43D854),
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                ),
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('OK',
-                    style: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w700)),
-              ),
-            ),
-          ],
           ),
-        ),
+          const SizedBox(height: 16),
+          Text(
+            widget.topic.title,
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '$est est. • $studied studied • 100%',
+            style: const TextStyle(
+              fontSize: 13,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 20),
+          if (_loadingMockTest)
+            const Center(child: CircularProgressIndicator())
+          else if (_mockTestInfo != null)
+            FilledButton.icon(
+              onPressed: _mockTestInfo!.canStart
+                  ? () {
+                      Navigator.pop(context);
+                      context.push('/topic-test/${widget.topic.id}');
+                    }
+                  : null,
+              icon: const Icon(Icons.quiz_outlined),
+              label: const Text('Start Mock Test'),
+              style: FilledButton.styleFrom(
+                backgroundColor: widget.subjectColor,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            )
+          else
+            const Text(
+              'No mock test available for this topic.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.textSecondary),
+            ),
+        ],
       ),
     );
   }
 }
-

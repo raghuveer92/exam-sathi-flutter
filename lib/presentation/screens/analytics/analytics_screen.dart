@@ -67,10 +67,19 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   String _formatHours(double hours) {
-    if (hours == hours.roundToDouble()) {
-      return '${hours.toInt()}h';
-    }
-    return '${hours.toStringAsFixed(1)}h';
+    if (hours <= 0) return '0h';
+    final totalMinutes = (hours * 60).round();
+    final h = totalMinutes ~/ 60;
+    final m = totalMinutes % 60;
+    if (h == 0) return '${m}m';
+    if (m == 0) return '${h}h';
+    return '${h}h ${m}m';
+  }
+
+  String _dailyTargetSubtitle(double todayHours, double dailyTarget) {
+    if (dailyTarget <= 0) return 'Set a target date on your exams';
+    final pct = (todayHours / dailyTarget * 100).round();
+    return 'Today: ${_formatHours(todayHours)} / ${_formatHours(dailyTarget)} ($pct%)';
   }
 
   String? _activeExamName(List<UserExamModel> exams) {
@@ -102,17 +111,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           }
 
           final d = state.dashboard;
-          final weekKeys = List.generate(7, (i) {
-            final day = DateTime.now().subtract(Duration(days: 6 - i));
-            return '${day.year.toString().padLeft(4, '0')}-'
-                '${day.month.toString().padLeft(2, '0')}-'
-                '${day.day.toString().padLeft(2, '0')}';
-          }).toSet();
-          final weeklyHours = d.weeklyLogs.fold<double>(
-            0,
-            (sum, log) =>
-                weekKeys.contains(log.studyDate) ? sum + log.hoursStudied : sum,
-          );
+          final dailyTarget = state.calculatedDailyTarget;
           final activeExam = _activeExamName(d.myExams);
           final progressSubtitle = activeExam != null
               ? 'Across $activeExam'
@@ -158,11 +157,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: _SummaryMetricCard(
-                              title: 'Study Hours',
-                              value: _formatHours(weeklyHours),
-                              subtitle: 'This Week',
-                              icon: Icons.schedule_rounded,
-                              color: AppColors.secondary,
+                              title: 'Daily Target',
+                              value: dailyTarget > 0
+                                  ? _formatHours(dailyTarget)
+                                  : '--',
+                              subtitle: _dailyTargetSubtitle(
+                                d.todayHours,
+                                dailyTarget,
+                              ),
+                              icon: Icons.track_changes_rounded,
+                              color: AppColors.success,
                             ),
                           ),
                         ],

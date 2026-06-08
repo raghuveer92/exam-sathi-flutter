@@ -58,7 +58,6 @@ class ExamCatalogRepository {
     required int examId,
     required DateTime examDate,
     DateTime? syllabusTargetDate,
-    required double dailyTargetHours,
     required String experienceLevel,
     List<Map<String, dynamic>> subjectSelections = const [],
   }) async {
@@ -69,7 +68,6 @@ class ExamCatalogRepository {
         'examDate': _fmt(examDate),
         if (syllabusTargetDate != null)
           'syllabusTargetDate': _fmt(syllabusTargetDate),
-        'dailyTargetHours': dailyTargetHours,
         'experienceLevel': experienceLevel,
         if (subjectSelections.isNotEmpty) 'subjectSelections': subjectSelections,
       },

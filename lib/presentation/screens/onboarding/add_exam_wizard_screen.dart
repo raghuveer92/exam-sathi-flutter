@@ -7,6 +7,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/firebase/analytics_service.dart';
 import '../../../data/models/exam_category_model.dart';
 import '../../../data/models/exam_model.dart';
+import '../../../data/repositories/auth_repository.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 import '../../../data/repositories/exam_catalog_repository.dart';
 import '../../blocs/auth/auth_bloc.dart';
@@ -45,7 +46,6 @@ class _AddExamWizardScreenState extends State<AddExamWizardScreen> {
 
   DateTime? _examDate;
   String _datePreset = 'upcoming';
-  double _dailyHours = 2;
   String _experience = 'BEGINNER';
 
   @override
@@ -167,10 +167,11 @@ class _AddExamWizardScreenState extends State<AddExamWizardScreen> {
         examId: _selectedExam!.id,
         examDate: examDate,
         syllabusTargetDate: examDate.subtract(const Duration(days: 30)),
-        dailyTargetHours: _dailyHours,
         experienceLevel: _experience,
         subjectSelections: _subjectSelections,
       );
+      await GetIt.I<AuthRepository>().cacheUser(user);
+      await _dashboardRepo.applyEnrollmentToCache(user);
       if (!mounted) return;
       AnalyticsService.logExamSelected(
         examId: _selectedExam!.id,
@@ -178,7 +179,10 @@ class _AddExamWizardScreenState extends State<AddExamWizardScreen> {
       );
       context.read<AuthBloc>().add(AuthUserUpdated(user: user));
       context.read<DashboardBloc>().add(DashboardResetRequested());
-      context.go('/home');
+      final redirect = widget.isOnboarding ? '/home' : '/my-exams';
+      context.go(
+        '/offline-setup?redirect=${Uri.encodeComponent(redirect)}&title=${Uri.encodeComponent('Downloading Exam Content')}',
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -249,14 +253,12 @@ class _AddExamWizardScreenState extends State<AddExamWizardScreen> {
         return _StepSetGoal(
           datePreset: _datePreset,
           examDate: _examDate,
-          dailyHours: _dailyHours,
           experience: _experience,
           onDatePreset: (v) => setState(() => _datePreset = v),
           onCustomDate: (d) => setState(() {
             _examDate = d;
             _datePreset = 'custom';
           }),
-          onDailyHours: (h) => setState(() => _dailyHours = h),
           onExperience: (e) => setState(() => _experience = e),
           onContinue: () => setState(() => _step = 2),
         );
@@ -264,7 +266,6 @@ class _AddExamWizardScreenState extends State<AddExamWizardScreen> {
         return _StepConfirm(
           exam: _selectedExam!,
           examDate: _resolveExamDate(),
-          dailyHours: _dailyHours,
           experience: _experience,
           loading: _loading,
           onConfirm: _confirmEnroll,
@@ -517,22 +518,18 @@ class _StepChooseExam extends StatelessWidget {
 class _StepSetGoal extends StatelessWidget {
   final String datePreset;
   final DateTime? examDate;
-  final double dailyHours;
   final String experience;
   final ValueChanged<String> onDatePreset;
   final ValueChanged<DateTime> onCustomDate;
-  final ValueChanged<double> onDailyHours;
   final ValueChanged<String> onExperience;
   final VoidCallback onContinue;
 
   const _StepSetGoal({
     required this.datePreset,
     required this.examDate,
-    required this.dailyHours,
     required this.experience,
     required this.onDatePreset,
     required this.onCustomDate,
-    required this.onDailyHours,
     required this.onExperience,
     required this.onContinue,
   });
@@ -577,20 +574,6 @@ class _StepSetGoal extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 28),
-        const Text('Daily Study Goal',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 10,
-          children: [1.0, 2.0, 4.0, 6.0].map((h) {
-            return _ChipOption(
-              label: h == 1 ? '1 Hour' : '${h.toInt()} Hours',
-              selected: dailyHours == h,
-              onTap: () => onDailyHours(h),
-            );
-          }).toList(),
-        ),
-        const SizedBox(height: 28),
         const Text('Experience Level',
             style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
         const SizedBox(height: 12),
@@ -624,7 +607,6 @@ class _StepSetGoal extends StatelessWidget {
 class _StepConfirm extends StatelessWidget {
   final ExamModel exam;
   final DateTime examDate;
-  final double dailyHours;
   final String experience;
   final bool loading;
   final VoidCallback onConfirm;
@@ -632,7 +614,6 @@ class _StepConfirm extends StatelessWidget {
   const _StepConfirm({
     required this.exam,
     required this.examDate,
-    required this.dailyHours,
     required this.experience,
     required this.loading,
     required this.onConfirm,
@@ -658,7 +639,6 @@ class _StepConfirm extends StatelessWidget {
                     style: const TextStyle(color: AppColors.textSecondary)),
                 const Divider(height: 28),
                 _SummaryRow('Target Date', '${examDate.year}-${examDate.month}-${examDate.day}'),
-                _SummaryRow('Daily Study', '${dailyHours.toStringAsFixed(1)} hours'),
                 _SummaryRow('Experience', experience.toLowerCase()),
               ],
             ),
