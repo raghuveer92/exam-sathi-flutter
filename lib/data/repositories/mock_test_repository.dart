@@ -49,15 +49,22 @@ class MockTestRepository {
   }
 
   /// Called during SYNC — caches question bank for offline tests.
-  Future<void> syncTopicForOffline(int topicId) async {
+  Future<int> syncTopicForOffline(int topicId) async {
     final info = await _fetchTopicInfoRemote(topicId);
-    if (!info.canStart) return;
+    if (!info.canStart) {
+      await _store.deleteKey(_store.topicMockInfoKey(topicId));
+      await _store.deleteKey(_store.mockTestQuestionsKey(topicId));
+      return 0;
+    }
     final attempt = await _startTestRemote(topicId);
     await _store.putString(
       _store.mockTestQuestionsKey(topicId),
       jsonEncode(_attemptToCacheJson(attempt)),
     );
+    return attempt.totalQuestions;
   }
+
+  Future<void> clearOfflineCache() => _store.clearMockTestCache();
 
   Map<String, dynamic> _attemptToCacheJson(MockTestAttemptModel attempt) {
     return {

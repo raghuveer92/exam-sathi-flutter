@@ -371,27 +371,36 @@ class SyncService {
     stats.dailyStudyLogs =
         await _progressRepository.downloadWeeklyStudyLogs();
 
-    final topicIds = await _collectTopicIds();
-    _emit(SyncStep.mockTests, onProgress, current: 0, total: topicIds.length);
+    await _mockTestRepository.clearOfflineCache();
+    final mockTestTopicIds = _resolveMockTestTopicIds();
+    _emit(
+      SyncStep.mockTests,
+      onProgress,
+      current: 0,
+      total: mockTestTopicIds.length,
+    );
 
     var topicIndex = 0;
-    for (final topicId in topicIds) {
+    for (final topicId in mockTestTopicIds) {
       topicIndex++;
       _emit(
-        SyncStep.questions,
+        SyncStep.mockTests,
         onProgress,
         current: topicIndex,
-        total: topicIds.length,
+        total: mockTestTopicIds.length,
         detail: 'Topic $topicId',
       );
       try {
-        await _mockTestRepository.syncTopicForOffline(topicId);
-        stats.mockTests++;
+        final questionCount =
+            await _mockTestRepository.syncTopicForOffline(topicId);
+        if (questionCount > 0) {
+          stats.mockTests++;
+          stats.questions += questionCount;
+        }
       } catch (e, st) {
         _logger.w('Mock test sync skipped $topicId', error: e, stackTrace: st);
       }
     }
-    stats.questions = stats.mockTests;
 
     _emit(SyncStep.progress, onProgress);
     try {
@@ -401,28 +410,11 @@ class SyncService {
     stats.log(_logger);
   }
 
-  Future<List<int>> _collectTopicIds() async {
-    final ids = <int>{};
-    final exams = await _dashboardRepository.resolveMyExamsFromCache();
-    for (final exam in exams) {
-      final subjects = await _dashboardRepository.getVisibleSubjectsByExam(
-        exam.examId,
-        forceRemote: false,
-      );
-      for (final subject in subjects) {
-        final detail = await _progressRepository.getSubjectDetailCached(
-          subject.id,
-          userExamId: exam.id,
-        );
-        if (detail == null) continue;
-        for (final chapter in detail.chapters) {
-          for (final topic in chapter.topics) {
-            ids.add(topic.id);
-          }
-        }
-      }
-    }
-    return ids.toList();
+  List<int> _resolveMockTestTopicIds() {
+    final catalog = _store.getJson(LocalStore.syncCatalogMasterKey);
+    final raw = catalog?['mockTestTopicIds'] as List<dynamic>?;
+    if (raw == null || raw.isEmpty) return const [];
+    return raw.map((e) => (e as num).toInt()).toList();
   }
 
   Future<void> syncLegacyFallback() async {

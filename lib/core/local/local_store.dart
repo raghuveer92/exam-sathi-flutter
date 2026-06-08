@@ -55,6 +55,20 @@ class LocalStore {
     await _box?.delete(key);
   }
 
+  /// Removes cached mock-test info and question banks (e.g. after server purge).
+  Future<void> clearMockTestCache() async {
+    final box = _box;
+    if (box == null) return;
+    final keys = box.keys.map((k) => k.toString()).toList();
+    for (final key in keys) {
+      if (key.startsWith('topic_mock_info_') ||
+          key.startsWith('mock_test_questions_') ||
+          key == mockPerformanceKey) {
+        await deleteKey(key);
+      }
+    }
+  }
+
   String subjectProgressKey(int examId) => 'subject_progress_$examId';
   String visibleSubjectsKey(int examId) => 'visible_subjects_$examId';
 
