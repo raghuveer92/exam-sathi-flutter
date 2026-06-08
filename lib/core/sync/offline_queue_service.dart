@@ -90,6 +90,7 @@ class OfflineQueueService {
     final type = item['type'] as String? ?? action;
     return action == 'SUBMIT_TEST' ||
         action == 'SET_ACTIVE_EXAM' ||
+        action == 'UPDATE_EXAM_DATE' ||
         action == 'COMPLETE_TOPIC' ||
         action == 'ADD_STUDY_HOURS' ||
         action == 'LOG_STUDY_HOURS' ||

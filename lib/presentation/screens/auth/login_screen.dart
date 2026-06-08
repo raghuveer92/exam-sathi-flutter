@@ -33,8 +33,8 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
     if (_isLocalBackend) {
-      _emailCtrl.text = 'Raghuveer.ameta92@gmail.com';
-      _passwordCtrl.text = 'Raghu@123';
+      _emailCtrl.text = 'abc@gmail.comm';
+      _passwordCtrl.text = 'Abc@123';
     }
   }
 

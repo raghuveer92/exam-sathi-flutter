@@ -76,7 +76,8 @@ class DashboardModel extends Equatable {
         weeklyLogs,
       ];
 
-  DashboardModel copyWith({UserModel? user}) => DashboardModel(
+  DashboardModel copyWith({UserModel? user, List<UserExamModel>? myExams}) =>
+      DashboardModel(
         user: user ?? this.user,
         studyStreakDays: studyStreakDays,
         overallCompletionPercent: overallCompletionPercent,
@@ -88,28 +89,28 @@ class DashboardModel extends Equatable {
         todayTopicsCompleted: todayTopicsCompleted,
         estimatedDaysToComplete: estimatedDaysToComplete,
         subjectProgress: subjectProgress,
-        myExams: myExams,
+        myExams: myExams ?? this.myExams,
         weeklyLogs: weeklyLogs,
       );
 
-  /// User-level target, falling back to enrolled exams when needed.
+  /// Combined daily target across all enrolled exams.
   double get effectiveDailyTargetHours {
-    final fromUser = user.dailyTargetHours;
-    if (fromUser != null && fromUser > 0) return fromUser;
+    final seen = <int>{};
+    var total = 0.0;
 
     for (final source in [myExams, user.userExams]) {
       for (final exam in source) {
-        if (exam.isActive &&
-            exam.dailyTargetHours != null &&
-            exam.dailyTargetHours! > 0) {
-          return exam.dailyTargetHours!;
-        }
-      }
-      for (final exam in source) {
+        if (!seen.add(exam.id)) continue;
         final hours = exam.dailyTargetHours;
-        if (hours != null && hours > 0) return hours;
+        if (hours != null && hours > 0) total += hours;
       }
     }
+
+    if (total > 0) return (total * 10).round() / 10.0;
+
+    final fromUser = user.dailyTargetHours;
+    if (fromUser != null && fromUser > 0) return fromUser;
+
     return 0.0;
   }
 }

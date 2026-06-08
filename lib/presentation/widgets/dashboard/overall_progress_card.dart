@@ -410,10 +410,13 @@ class OverallProgressCard extends StatelessWidget {
   }
 
   String _fmtHours(double hours) {
-    if (hours == hours.roundToDouble()) {
-      return '${hours.toInt()}h';
-    }
-    return '${hours.toStringAsFixed(1)}h';
+    if (hours <= 0) return '0h';
+    final totalMinutes = (hours * 60).round();
+    final h = totalMinutes ~/ 60;
+    final m = totalMinutes % 60;
+    if (h == 0) return '${m}m';
+    if (m == 0) return '${h}h';
+    return '${h}h ${m}m';
   }
 }
 

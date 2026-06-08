@@ -169,6 +169,8 @@ class SyncService {
           await _mockTestRepository.flushQueuedSubmit(item);
         } else if (action == 'SET_ACTIVE_EXAM') {
           await _dashboardRepository.flushQueuedActiveExam(item);
+        } else if (action == 'UPDATE_EXAM_DATE') {
+          await _dashboardRepository.flushQueuedExamDate(item);
         } else if (action == 'COMPLETE_TOPIC' ||
             action == 'ADD_STUDY_HOURS' ||
             type == 'TOPIC_PROGRESS') {

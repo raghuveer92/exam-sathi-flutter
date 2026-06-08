@@ -4,8 +4,10 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/sync/progress_rebuild_service.dart';
 import '../../../data/models/exam_subject_group_model.dart';
 import '../../../data/models/exam_model.dart';
+import '../../../data/models/user_model.dart';
 import '../../../data/models/user_exam_model.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 import '../../blocs/auth/auth_bloc.dart';
@@ -26,7 +28,6 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
   final _repo = GetIt.I<DashboardRepository>();
   bool _loading = true;
   List<UserExamModel> _myExams = const [];
-  List<ExamModel> _allExams = const [];
 
   DateTime _offsetFromToday({required int months}) {
     final now = DateTime.now();
@@ -128,17 +129,16 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
     _load();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool rebuildLocal = false}) async {
     setState(() => _loading = true);
     try {
-      final results = await Future.wait([
-        _repo.getMyExams(),
-        _repo.getExams(),
-      ]);
+      if (rebuildLocal) {
+        await GetIt.I<ProgressRebuildService>().rebuildAll();
+      }
+      final myExams = await _repo.resolveMyExamsFromCache();
       if (!mounted) return;
       setState(() {
-        _myExams = results[0] as List<UserExamModel>;
-        _allExams = results[1] as List<ExamModel>;
+        _myExams = myExams;
         _loading = false;
       });
     } catch (e) {
@@ -150,13 +150,20 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
     }
   }
 
-  Future<void> _syncUserInState() async {
-    final me = await GetIt.I<DashboardRepository>().getDashboard();
+  Future<void> _syncUserInState({UserModel? user}) async {
     if (!mounted) return;
-    context.read<DashboardBloc>().add(DashboardRefreshRequested());
+    if (user != null) {
+      context.read<DashboardBloc>().add(DashboardUserPatched(user));
+    } else {
+      context.read<DashboardBloc>().add(DashboardRefreshRequested());
+    }
+    final me = user ??
+        (await GetIt.I<DashboardRepository>().getDashboard(forceRemote: false))
+            .user;
+    if (!mounted) return;
     final authState = context.read<AuthBloc>().state;
     if (authState is AuthAuthenticated) {
-      context.read<AuthBloc>().add(AuthUserUpdated(user: me.user));
+      context.read<AuthBloc>().add(AuthUserUpdated(user: me));
     }
   }
 
@@ -167,8 +174,9 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
   }
 
   Future<void> _addExam() async {
+    final allExams = await _repo.getExams(forceRemote: false);
     final existingExamIds = _myExams.map((e) => e.examId).toSet();
-    final available = _allExams.where((e) => !existingExamIds.contains(e.id)).toList();
+    final available = allExams.where((e) => !existingExamIds.contains(e.id)).toList();
     if (available.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('All available exams are already added.')),
@@ -441,9 +449,25 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
       lastDate: DateTime.now().add(const Duration(days: 1500)),
     );
     if (picked == null) return;
-    await _repo.updateMyExamDate(ue.id, picked);
-    await _load();
-    await _syncUserInState();
+    try {
+      final user = await _repo.updateMyExamDate(ue.id, picked);
+      await _load();
+      await _syncUserInState(user: user);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Target date updated locally. Tap SYNC to save to server.'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not update target date: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
   }
 
   Widget _buildEmptyState() {
@@ -561,7 +585,7 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: _load,
+              onRefresh: () => _load(rebuildLocal: true),
               child: _myExams.isEmpty
                   ? LayoutBuilder(
                       builder: (context, constraints) => SingleChildScrollView(
@@ -608,6 +632,11 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
                           const SizedBox(height: 8),
                           Text('Syllabus target: ${e.examDate ?? 'Not set'}'),
                           Text('Days left to target: ${e.daysLeft?.toString() ?? '--'}'),
+                          if (e.dailyTargetHours != null && e.dailyTargetHours! > 0)
+                            Text(
+                              'Daily target: ${e.dailyTargetHours!.toStringAsFixed(1)}h · '
+                              'Weekly: ${(e.weeklyTargetHours ?? e.dailyTargetHours! * 7).toStringAsFixed(1)}h',
+                            ),
                           Text('Subjects: ${e.totalSubjects?.toString() ?? '--'}'),
                           Text('Progress: ${(e.progressPercent ?? 0).toStringAsFixed(1)}%'),
                           const SizedBox(height: 8),

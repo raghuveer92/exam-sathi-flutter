@@ -25,6 +25,16 @@ class DashboardExamChanged extends DashboardEvent {
   List<Object?> get props => [examId, examName, clearGoal];
 }
 
+/// Apply a locally patched user (e.g. after target date edit) without re-fetching.
+class DashboardUserPatched extends DashboardEvent {
+  final UserModel user;
+
+  const DashboardUserPatched(this.user);
+
+  @override
+  List<Object?> get props => [user];
+}
+
 /// User tapped [+] or [-] on daily study hours — triggers instant UI update + debounced save.
 class StudyHoursUpdated extends DashboardEvent {
   final double dailyTargetHours;

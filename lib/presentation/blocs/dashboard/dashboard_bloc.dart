@@ -6,6 +6,7 @@ import 'package:equatable/equatable.dart';
 import '../../../core/sync/offline_queue_service.dart';
 import '../../../core/sync/progress_rebuild_service.dart';
 import '../../../data/models/dashboard_model.dart';
+import '../../../data/models/user_model.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 
 part 'dashboard_event.dart';
@@ -29,6 +30,7 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
     on<DashboardLoadRequested>(_onLoadRequested);
     on<DashboardRefreshRequested>(_onRefreshRequested);
     on<DashboardExamChanged>(_onExamChanged);
+    on<DashboardUserPatched>(_onUserPatched);
     on<DashboardResetRequested>((_, emit) {
       _debounce?.cancel();
       _resetTimer?.cancel();
@@ -59,6 +61,22 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
       ),
     );
     emit(current.copyWith(dashboard: updatedDashboard));
+  }
+
+  void _onUserPatched(
+    DashboardUserPatched event,
+    Emitter<DashboardState> emit,
+  ) {
+    if (state is! DashboardLoaded) return;
+    final current = state as DashboardLoaded;
+    emit(current.copyWith(
+      dashboard: current.dashboard.copyWith(
+        user: event.user,
+        myExams: event.user.userExams.isNotEmpty
+            ? event.user.userExams
+            : null,
+      ),
+    ));
   }
 
   @override

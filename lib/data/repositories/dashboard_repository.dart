@@ -4,6 +4,7 @@ import '../models/dashboard_model.dart';
 import '../models/subject_detail_model.dart';
 import '../models/exam_subject_group_model.dart';
 import '../models/exam_model.dart';
+import '../models/exam_catalog_model.dart';
 import '../models/subject_model.dart';
 import '../models/subject_progress_model.dart';
 import '../models/user_exam_model.dart';
@@ -20,6 +21,25 @@ String _fmtLocalDate(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-'
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
+
+int? _daysLeftFromExamDate(String dateStr) {
+  final parsed = DateTime.tryParse(dateStr);
+  if (parsed == null) return null;
+  final today = DateTime.now();
+  final todayDate = DateTime(today.year, today.month, today.day);
+  final examDay = DateTime(parsed.year, parsed.month, parsed.day);
+  return examDay.difference(todayDate).inDays;
+}
+
+({double daily, double weekly})? _autoStudyHoursFromTotal(
+  double totalHours,
+  int daysRemaining,
+) {
+  if (totalHours <= 0 || daysRemaining <= 0) return null;
+  final daily = ((totalHours / daysRemaining) * 10).round() / 10.0;
+  final weekly = ((daily * 7) * 10).round() / 10.0;
+  return (daily: daily, weekly: weekly);
+}
 
 /// Local-only grouping for subjects screen.
 class ExamSubjectsCacheGroup {
@@ -919,12 +939,286 @@ class DashboardRepository {
     return UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
   }
 
+  /// Local-first: patch cache immediately; server update only on SYNC.
   Future<UserModel> updateMyExamDate(int userExamId, DateTime examDate) async {
+    final user = await _patchExamDateLocally(userExamId, examDate);
+    await _queueExamDateChange(userExamId, examDate);
+    return user;
+  }
+
+  Future<UserModel> _updateMyExamDateRemote(int userExamId, DateTime examDate) async {
+    ApiCallTracker.instance.record('PATCH exam date');
     final response = await _client.dio.patch(
       ApiEndpoints.myExamDate(userExamId),
       data: {'examDate': _fmtLocalDate(examDate)},
     );
-    return UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
+    final remote =
+        UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
+    await _applyUserToCache(remote);
+    await _removeQueuedExamDateChanges(userExamId);
+    return remote;
+  }
+
+  Future<void> flushQueuedExamDate(Map<String, dynamic> item) async {
+    final userExamId = (item['payload']?['userExamId'] as num?)?.toInt();
+    final examDateStr = item['payload']?['examDate'] as String?;
+    if (userExamId == null || examDateStr == null) {
+      if (userExamId != null) await _removeQueuedExamDateChanges(userExamId);
+      return;
+    }
+    final examDate = DateTime.tryParse(examDateStr);
+    if (examDate == null) {
+      await _removeQueuedExamDateChanges(userExamId);
+      return;
+    }
+    try {
+      await _updateMyExamDateRemote(userExamId, examDate);
+    } catch (_) {
+      final exam = await resolveUserExamById(userExamId);
+      if (exam?.examDate == examDateStr) {
+        await _removeQueuedExamDateChanges(userExamId);
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  Future<UserModel> _patchExamDateLocally(int userExamId, DateTime examDate) async {
+    final dateStr = _fmtLocalDate(examDate);
+    final daysLeft = _daysLeftFromExamDate(dateStr);
+
+    final exams = await resolveMyExamsFromCache();
+    final targetExam = exams.firstWhere(
+      (exam) => exam.id == userExamId,
+      orElse: () => throw StateError('Exam not found offline. Tap SYNC while online.'),
+    );
+
+    final totalHours = await _estimateTotalHoursForUserExam(
+      targetExam.examId,
+      userExamId,
+    );
+    final autoHours = await _resolveAutoStudyHoursForDateChange(
+      exam: targetExam,
+      newDaysLeft: daysLeft,
+      syllabusTotalHours: totalHours,
+    );
+
+    UserExamModel? updated;
+    final updatedExams = exams.map((exam) {
+      if (exam.id != userExamId) return exam;
+      updated = UserExamModel(
+        id: exam.id,
+        examId: exam.examId,
+        examName: exam.examName,
+        examDate: dateStr,
+        daysLeft: daysLeft,
+        totalSubjects: exam.totalSubjects,
+        progressPercent: exam.progressPercent,
+        dailyTargetHours: autoHours?.daily ?? exam.dailyTargetHours,
+        weeklyTargetHours: autoHours?.weekly ?? exam.weeklyTargetHours,
+        isActive: exam.isActive,
+      );
+      return updated!;
+    }).toList();
+
+    final patchedExam = updated!;
+
+    await _store.putJson(
+      LocalStore.myExamsKey,
+      updatedExams.map((e) => e.toJson()).toList(),
+    );
+
+    final profile = Map<String, dynamic>.from(
+      _store.getJson(LocalStore.userProfileKey) ??
+          (await getDashboardCached())?.user.toJson() ??
+          {},
+    );
+    profile['userExams'] = updatedExams.map((e) => e.toJson()).toList();
+    if (patchedExam.isActive) {
+      profile['examDate'] = dateStr;
+      profile['daysUntilExam'] = daysLeft;
+      if (autoHours != null) {
+        profile['dailyTargetHours'] = autoHours.daily;
+        profile['weeklyTargetHours'] = autoHours.weekly;
+      }
+    }
+
+    final dashData = _store.getJson(LocalStore.dashboardKey);
+    if (dashData != null) {
+      final dash = Map<String, dynamic>.from(dashData);
+      dash['user'] = Map<String, dynamic>.from(profile);
+      dash['myExams'] = updatedExams.map((e) => e.toJson()).toList();
+      await _store.putJson(LocalStore.dashboardKey, dash);
+    }
+
+    await _store.putJson(LocalStore.userProfileKey, profile);
+    return UserModel.fromJson(profile);
+  }
+
+  Future<double> _estimateTotalHoursForUserExam(int examId, int userExamId) async {
+    var total = 0.0;
+    final subjects = resolveVisibleSubjects(examId);
+
+    for (final subject in subjects) {
+      var subjectHours = 0.0;
+      final data = _store.getJson(_store.subjectDetailKey(userExamId, subject.id));
+      if (data != null) {
+        final chapters = data['chapters'];
+        if (chapters is List) {
+          for (final chapter in chapters) {
+            if (chapter is! Map) continue;
+            final topics = chapter['topics'];
+            if (topics is List) {
+              for (final topic in topics) {
+                if (topic is Map) {
+                  subjectHours +=
+                      ((topic['estimatedHours'] as num?) ?? 1.0).toDouble();
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (subjectHours <= 0) {
+        subjectHours = _estimatedHoursFromSyncCatalog(subject.id);
+      }
+
+      if (subjectHours <= 0) {
+        final progress = getSubjectProgressCached(examId);
+        if (progress != null) {
+          for (final row in progress) {
+            if (row.subjectId == subject.id && row.totalEstimatedHours > 0) {
+              subjectHours = row.totalEstimatedHours;
+              break;
+            }
+          }
+        }
+      }
+      total += subjectHours;
+    }
+
+    if (total <= 0) {
+      total = _estimatedHoursFromSyncCatalogForExam(examId, subjects);
+    }
+
+    if (total <= 0) {
+      final dash = await getDashboardCached();
+      if (dash != null && dash.totalEstimatedHours > 0) {
+        return dash.totalEstimatedHours;
+      }
+    }
+    return total;
+  }
+
+  double _estimatedHoursFromSyncCatalog(int subjectId) {
+    final catalog = _store.getJson(LocalStore.syncCatalogMasterKey);
+    if (catalog == null) return 0;
+
+    final chapters = catalog['chapters'];
+    final topics = catalog['topics'];
+    if (chapters is! List || topics is! List) return 0;
+
+    final chapterIds = <int>{};
+    for (final raw in chapters) {
+      if (raw is! Map) continue;
+      if ((raw['subjectId'] as num?)?.toInt() == subjectId &&
+          raw['isActive'] != false) {
+        final id = (raw['id'] as num?)?.toInt();
+        if (id != null) chapterIds.add(id);
+      }
+    }
+    if (chapterIds.isEmpty) return 0;
+
+    var total = 0.0;
+    for (final raw in topics) {
+      if (raw is! Map) continue;
+      if (raw['isActive'] == false) continue;
+      final chapterId = (raw['chapterId'] as num?)?.toInt();
+      if (chapterId == null || !chapterIds.contains(chapterId)) continue;
+      total += ((raw['estimatedHours'] as num?) ?? 1.0).toDouble();
+    }
+    return total;
+  }
+
+  double _estimatedHoursFromSyncCatalogForExam(
+    int examId,
+    List<SubjectModel> subjects,
+  ) {
+    if (subjects.isEmpty) return 0;
+    var total = 0.0;
+    for (final subject in subjects) {
+      total += _estimatedHoursFromSyncCatalog(subject.id);
+    }
+    return total;
+  }
+
+  Future<({double daily, double weekly})?> _resolveAutoStudyHoursForDateChange({
+    required UserExamModel exam,
+    required int? newDaysLeft,
+    required double syllabusTotalHours,
+  }) async {
+    if (newDaysLeft == null || newDaysLeft <= 0) return null;
+
+    if (syllabusTotalHours > 0) {
+      return _autoStudyHoursFromTotal(syllabusTotalHours, newDaysLeft);
+    }
+
+    final previousDaily = await _resolvePreviousDailyTarget(exam);
+    final previousDaysLeft =
+        exam.daysLeft ?? _daysLeftFromExamDate(exam.examDate ?? '');
+    if (previousDaily != null &&
+        previousDaily > 0 &&
+        previousDaysLeft != null &&
+        previousDaysLeft > 0) {
+      final inferredTotal = previousDaily * previousDaysLeft;
+      return _autoStudyHoursFromTotal(inferredTotal, newDaysLeft);
+    }
+
+    return null;
+  }
+
+  Future<double?> _resolvePreviousDailyTarget(UserExamModel exam) async {
+    if (exam.dailyTargetHours != null && exam.dailyTargetHours! > 0) {
+      return exam.dailyTargetHours;
+    }
+    if (!exam.isActive) return null;
+
+    final profile = _store.getJson(LocalStore.userProfileKey);
+    final profileDaily = (profile?['dailyTargetHours'] as num?)?.toDouble();
+    if (profileDaily != null && profileDaily > 0) return profileDaily;
+
+    final dash = _store.getJson(LocalStore.dashboardKey);
+    final dashUser = dash?['user'];
+    if (dashUser is Map<String, dynamic>) {
+      final dashDaily = (dashUser['dailyTargetHours'] as num?)?.toDouble();
+      if (dashDaily != null && dashDaily > 0) return dashDaily;
+    }
+    return null;
+  }
+
+  Future<void> _queueExamDateChange(int userExamId, DateTime examDate) async {
+    await _removeQueuedExamDateChanges(userExamId);
+    await _offlineQueue.enqueue(
+      entityType: 'USER_EXAM',
+      entityId: userExamId.toString(),
+      action: 'UPDATE_EXAM_DATE',
+      payload: {
+        'userExamId': userExamId,
+        'examDate': _fmtLocalDate(examDate),
+      },
+    );
+  }
+
+  Future<void> _removeQueuedExamDateChanges(int userExamId) async {
+    final queue = _offlineQueue.pendingItems
+        .where((e) {
+          if (e['action'] != 'UPDATE_EXAM_DATE') return true;
+          final queuedId = (e['payload']?['userExamId'] as num?)?.toInt();
+          return queuedId != userExamId;
+        })
+        .toList();
+    await _store.putJson(LocalStore.offlineQueueKey, queue);
   }
 
   /// Local-first: patch cache immediately; sync PATCH when online / on SYNC.
@@ -1066,11 +1360,41 @@ class DashboardRepository {
     return UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
   }
 
-  Future<List<ExamModel>> getExams() async {
-    ApiCallTracker.instance.record('GET ${ApiEndpoints.exams}');
-    final response = await _client.dio.get(ApiEndpoints.exams);
-    final list = response.data['data'] as List<dynamic>;
-    return list.map((e) => ExamModel.fromJson(e as Map<String, dynamic>)).toList();
+  Future<List<ExamModel>> getExamsCached() async {
+    final syncCatalog = _store.getJson(LocalStore.syncCatalogMasterKey);
+    final fromSync = syncCatalog?['exams'] as List<dynamic>?;
+    if (fromSync != null && fromSync.isNotEmpty) {
+      return fromSync
+          .map((e) => ExamModel.fromJson(e as Map<String, dynamic>))
+          .where((e) => e.isActive)
+          .toList();
+    }
+
+    final catalog = _store.getJson(LocalStore.catalogKey);
+    if (catalog != null) {
+      final parsed = ExamCatalogModel.fromJson(catalog);
+      final merged = <int, ExamModel>{};
+      for (final exam in [...parsed.featuredExams, ...parsed.recommendedExams]) {
+        if (exam.isActive) merged[exam.id] = exam;
+      }
+      if (merged.isNotEmpty) return merged.values.toList();
+    }
+
+    return const [];
+  }
+
+  Future<List<ExamModel>> getExams({bool forceRemote = false}) async {
+    if (!forceRemote) {
+      return getExamsCached();
+    }
+    try {
+      ApiCallTracker.instance.record('GET ${ApiEndpoints.exams}');
+      final response = await _client.dio.get(ApiEndpoints.exams);
+      final list = response.data['data'] as List<dynamic>;
+      return list.map((e) => ExamModel.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return getExamsCached();
+    }
   }
 
   Future<void> selectExam(int examId) async {
