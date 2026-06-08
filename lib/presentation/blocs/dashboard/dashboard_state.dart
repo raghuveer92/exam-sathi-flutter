@@ -12,24 +12,28 @@ class DashboardLoading extends DashboardState {}
 class DashboardLoaded extends DashboardState {
   final DashboardModel dashboard;
   final double calculatedDailyTarget;
+  final int refreshSequence;
 
   const DashboardLoaded({
     required this.dashboard,
     required this.calculatedDailyTarget,
+    this.refreshSequence = 0,
   });
 
   DashboardLoaded copyWith({
     DashboardModel? dashboard,
     double? calculatedDailyTarget,
+    int? refreshSequence,
   }) =>
       DashboardLoaded(
         dashboard: dashboard ?? this.dashboard,
         calculatedDailyTarget:
             calculatedDailyTarget ?? this.calculatedDailyTarget,
+        refreshSequence: refreshSequence ?? this.refreshSequence,
       );
 
   @override
-  List<Object?> get props => [dashboard, calculatedDailyTarget];
+  List<Object?> get props => [dashboard, calculatedDailyTarget, refreshSequence];
 }
 
 class DashboardError extends DashboardState {

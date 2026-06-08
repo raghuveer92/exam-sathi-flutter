@@ -30,7 +30,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final Map<int, List<SubjectProgressModel>> _subjectsByExam =
       <int, List<SubjectProgressModel>>{};
   bool _loadingSubjects = false;
-  String _subjectsLoadKey = '';
+  int _handledRefreshSequence = -1;
 
   void _setStateSafely(VoidCallback updater) {
     if (!mounted) return;
@@ -65,7 +65,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _refresh() async {
-    context.read<DashboardBloc>().add(DashboardRefreshRequested());
+    final bloc = context.read<DashboardBloc>();
+    final previousSequence = bloc.state is DashboardLoaded
+        ? (bloc.state as DashboardLoaded).refreshSequence
+        : -1;
+    final refreshDone = bloc.stream.firstWhere(
+      (s) =>
+          s is DashboardError ||
+          (s is DashboardLoaded && s.refreshSequence > previousSequence),
+    );
+    bloc.add(DashboardRefreshRequested());
+    await refreshDone.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => bloc.state,
+    );
+    if (!mounted || bloc.state is! DashboardLoaded) return;
+    while (_loadingSubjects) {
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+  }
+
+  Future<void> _reloadSubjectProgress(List<UserExamModel> exams) async {
+    while (_loadingSubjects) {
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+    if (!mounted) return;
+    await _loadSubjectsGroupedByExam(exams);
   }
 
   Future<void> _activateExam(UserExamModel exam) async {
@@ -83,24 +108,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  void _ensureSubjectsLoaded(List<UserExamModel> exams) {
-    final sortedIds = exams.map((e) => e.examId).toList()..sort();
-    final loadKey = sortedIds.join('-');
-    if (_loadingSubjects || loadKey.isEmpty || loadKey == _subjectsLoadKey) {
-      return;
-    }
-    _subjectsLoadKey = loadKey;
-
-    // Avoid triggering setState while the widget tree is currently building.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _loadingSubjects) return;
-      _setStateSafely(() => _loadingSubjects = true);
-      unawaited(_loadSubjectsGroupedByExam(exams));
-    });
-  }
-
   Future<void> _loadSubjectsGroupedByExam(List<UserExamModel> exams) async {
     if (!mounted) return;
+    _setStateSafely(() => _loadingSubjects = true);
     try {
       final repo = GetIt.I<DashboardRepository>();
       final grouped = <int, List<SubjectProgressModel>>{};
@@ -147,7 +157,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
               return ad.compareTo(bd);
             });
 
-          _ensureSubjectsLoaded(exams);
+          if (loaded.refreshSequence != _handledRefreshSequence) {
+            _handledRefreshSequence = loaded.refreshSequence;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                unawaited(_reloadSubjectProgress(exams));
+              }
+            });
+          }
 
           return RefreshIndicator(
             onRefresh: _refresh,

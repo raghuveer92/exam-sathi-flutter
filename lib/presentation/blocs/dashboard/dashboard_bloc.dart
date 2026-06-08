@@ -95,6 +95,8 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
     DashboardRefreshRequested event,
     Emitter<DashboardState> emit,
   ) async {
+    final previousSequence =
+        state is DashboardLoaded ? (state as DashboardLoaded).refreshSequence : 0;
     try {
       await _progressRebuildService.rebuildAll();
       final dashboard = await _repository.getDashboardCached();
@@ -102,6 +104,7 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
         emit(DashboardLoaded(
           dashboard: dashboard,
           calculatedDailyTarget: _calcDailyTarget(dashboard),
+          refreshSequence: previousSequence + 1,
         ));
       }
     } catch (e) {

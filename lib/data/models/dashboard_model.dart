@@ -64,11 +64,14 @@ class DashboardModel extends Equatable {
 
   @override
   List<Object?> get props => [
-      user.selectedExamId,
-      user.selectedExamName,
+        user.selectedExamId,
+        user.selectedExamName,
         overallCompletionPercent,
         completedTopics,
+        totalTopics,
+        remainingTopics,
         studyStreakDays,
+        subjectProgress,
         myExams,
         todayHours,
         todayTopicsCompleted,
