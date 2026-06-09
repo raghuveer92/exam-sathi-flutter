@@ -99,6 +99,77 @@ class ProgressRepository {
     }
   }
 
+  /// Refresh cached subject syllabi when catalog delta arrives — keeps local progress.
+  Future<void> refreshSubjectDetailsFromCatalog({
+    required int userExamId,
+    required Iterable<int> subjectIds,
+  }) async {
+    for (final subjectId in subjectIds) {
+      final rebuilt = _buildSubjectDetailMapFromCatalog(subjectId);
+      if (rebuilt == null) continue;
+
+      final key = _store.subjectDetailKey(userExamId, subjectId);
+      final existing = _store.getJson(key);
+      final merged = existing != null
+          ? _mergeSubjectDetailWithLocal(rebuilt, existing)
+          : rebuilt;
+      _applyTopicProgressTableToSubjectMap(merged, userExamId, subjectId);
+      _recalculateSubjectStats(merged);
+      await _store.putJson(key, merged);
+    }
+  }
+
+  /// Apply progress rows for specific enrollments only (incremental sync).
+  Future<int> applyTopicProgressForEnrollments(Set<int> userExamIds) async {
+    if (userExamIds.isEmpty) return 0;
+    final table = _store.getJson(LocalTables.topicProgress);
+    if (table == null || table.isEmpty) return 0;
+
+    var applied = 0;
+    for (final userExamId in userExamIds) {
+      final bySubject = <int, List<Map<String, dynamic>>>{};
+      for (final entry in table.entries) {
+        final row = entry.value;
+        if (row is! Map<String, dynamic>) continue;
+        if ((row['userExamId'] as num?)?.toInt() != userExamId) continue;
+        final subjectId = (row['subjectId'] as num?)?.toInt();
+        if (subjectId == null) continue;
+        bySubject.putIfAbsent(subjectId, () => []).add(row);
+      }
+
+      for (final subjectEntry in bySubject.entries) {
+        final subjectId = subjectEntry.key;
+        final data =
+            _store.getJson(_store.subjectDetailKey(userExamId, subjectId));
+        if (data == null) continue;
+
+        for (final row in subjectEntry.value) {
+          final topicId = (row['topicId'] as num?)?.toInt();
+          if (topicId == null ||
+              _hasPendingTopicProgress(topicId, userExamId: userExamId)) {
+            continue;
+          }
+          if (_patchTopicRowInMap(
+            data,
+            topicId: topicId,
+            actualHours: (row['actualHours'] as num?)?.toDouble() ?? 0.0,
+            isCompleted: row['isCompleted'] as bool? ?? false,
+            status: row['status'] as String?,
+          )) {
+            applied++;
+          }
+        }
+
+        _recalculateSubjectStats(data);
+        await _store.putJson(
+          _store.subjectDetailKey(userExamId, subjectId),
+          data,
+        );
+      }
+    }
+    return applied;
+  }
+
   /// Build subject detail from `/sync/catalog` when per-subject API cache is missing.
   Future<SubjectDetailModel?> _materializeSubjectDetailFromCatalog({
     required int userExamId,
@@ -530,6 +601,7 @@ class ProgressRepository {
           userExamId: userExamId,
         );
       }
+      await _offlineQueue.removeByClientId(item['clientId'] as String);
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) {
         await _offlineQueue.removeByClientId(item['clientId'] as String);
@@ -561,6 +633,25 @@ class ProgressRepository {
         'hoursStudied': hoursStudied,
         'topicsCompleted': (payload['topicsCompleted'] as num?)?.toInt() ?? 0,
       },
+    );
+    await _writeDailyStudyLogRecord(
+      studyDate: studyDate,
+      hoursDelta: hoursStudied,
+      topicsDelta: (payload['topicsCompleted'] as num?)?.toInt() ?? 0,
+      syncStatus: LocalTables.syncStatusSynced,
+      replace: true,
+    );
+    await _offlineQueue.removeStudyLogsForDate(studyDate);
+  }
+
+  /// Drop queue rows whose local raw tables are already marked SYNCED.
+  Future<int> reconcileQueueWithSyncedState() async {
+    final topicTable = _store.getJson(LocalTables.topicProgress);
+    final logsTable = _store.getJson(LocalTables.dailyStudyLogs);
+    return _offlineQueue.purgeAcknowledgedItems(
+      topicProgressTable:
+          topicTable is Map<String, dynamic> ? topicTable : null,
+      dailyStudyLogsTable: logsTable is Map<String, dynamic> ? logsTable : null,
     );
   }
 
@@ -1075,6 +1166,10 @@ class ProgressRepository {
       table[rowKey] = row;
       await _store.putJson(LocalTables.topicProgress, table);
     }
+    await _offlineQueue.removeTopicProgressFor(
+      userExamId: userExamId,
+      topicId: topicId,
+    );
   }
 
   String _localTodayDate() {

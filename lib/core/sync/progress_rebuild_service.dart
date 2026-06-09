@@ -95,6 +95,20 @@ class ProgressRebuildService {
     await _patchExamProgressPercent(examId, pct, userExamId: userExamId);
   }
 
+  /// Rebuild progress for a subset of exams after incremental sync.
+  Future<void> rebuildExams(Iterable<int> examIds) async {
+    final idSet = examIds.toSet();
+    if (idSet.isEmpty) return;
+
+    final exams = await _dashboardRepository.resolveMyExamsFromCache();
+    for (final exam in exams) {
+      if (idSet.contains(exam.examId)) {
+        await rebuildExam(exam.examId, userExamId: exam.id);
+      }
+    }
+    await _rebuildDashboardAggregates();
+  }
+
   Future<void> _rebuildDashboardAggregates() async {
     final dashData = _store.getJson(LocalStore.dashboardKey);
     if (dashData == null) return;

@@ -447,7 +447,7 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
       context.read<AuthBloc>().add(AuthUserUpdated(user: user));
       context.read<DashboardBloc>().add(DashboardResetRequested());
       context.go(
-        '/offline-setup?redirect=${Uri.encodeComponent('/my-exams')}&title=${Uri.encodeComponent('Downloading Exam Content')}',
+        '/offline-setup?mode=enrollment&redirect=${Uri.encodeComponent('/my-exams')}&title=${Uri.encodeComponent('Downloading Exam Content')}',
       );
     } catch (e) {
       if (!mounted) return;

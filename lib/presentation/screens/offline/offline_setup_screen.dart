@@ -9,15 +9,19 @@ import '../../../core/sync/sync_progress.dart';
 import '../../../core/sync/sync_service.dart';
 import '../../../data/repositories/dashboard_repository.dart';
 
-/// Downloads syllabus, subjects, and progress — after login or adding an exam.
+/// Downloads syllabus — full on first login, scoped when adding an exam.
 class OfflineSetupScreen extends StatefulWidget {
   final String redirectPath;
   final String title;
+  final bool enrollmentOnly;
+  final int? userExamId;
 
   const OfflineSetupScreen({
     super.key,
     this.redirectPath = '/home',
     this.title = 'Preparing Offline Content',
+    this.enrollmentOnly = false,
+    this.userExamId,
   });
 
   @override
@@ -40,14 +44,24 @@ class _OfflineSetupScreenState extends State<OfflineSetupScreen> {
       _progress = const SyncProgress(step: SyncStep.preparing);
     });
     try {
-      await GetIt.I<SyncService>().downloadAllContent(
-        onProgress: (p) {
-          if (mounted) setState(() => _progress = p);
-        },
-      );
-      await GetIt.I<DashboardRepository>().reconcileDashboardCache();
-      await GetIt.I<ProgressRebuildService>().rebuildAll();
-      await GetIt.I<LocalStore>().markInitialDownloadComplete();
+      final sync = GetIt.I<SyncService>();
+      if (widget.enrollmentOnly) {
+        await sync.downloadEnrollmentContent(
+          onProgress: (p) {
+            if (mounted) setState(() => _progress = p);
+          },
+          userExamId: widget.userExamId,
+        );
+      } else {
+        await sync.downloadAllContent(
+          onProgress: (p) {
+            if (mounted) setState(() => _progress = p);
+          },
+        );
+        await GetIt.I<DashboardRepository>().reconcileDashboardCache();
+        await GetIt.I<ProgressRebuildService>().rebuildAll();
+        await GetIt.I<LocalStore>().markInitialDownloadComplete();
+      }
       if (!mounted) return;
       context.go(widget.redirectPath);
     } catch (e) {

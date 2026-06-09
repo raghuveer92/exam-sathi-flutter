@@ -76,6 +76,8 @@ class AuthRepository {
   Future<void> logout() async {
     await _client.clearToken();
     await _store.deleteKey(LocalStore.userProfileKey);
+    await _store.resetInitialDownloadComplete();
+    await _store.clearLastSyncTime();
   }
 
   Future<bool> isLoggedIn() => _client.hasToken();

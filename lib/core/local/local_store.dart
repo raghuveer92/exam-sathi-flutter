@@ -11,6 +11,7 @@ class LocalStore {
   static const String syncCatalogMasterKey = 'sync_catalog_master';
   static const String syncCatalogAtKey = 'sync_catalog_at';
   static const String syncBundleAtKey = 'sync_bundle_at';
+  static const String lastSyncTimeKey = 'last_sync_time';
   static const String offlineQueueKey = 'offline_queue';
   static const String mockPerformanceKey = 'mock_performance';
   static const String userProfileKey = 'user_profile';
@@ -92,6 +93,25 @@ class LocalStore {
 
   Future<void> resetInitialDownloadComplete() async {
     await deleteKey(initialDownloadCompleteKey);
+  }
+
+  /// Last successful sync timestamp — used for incremental bundle/catalog pulls.
+  DateTime? getLastSyncTime() {
+    final raw = getString(lastSyncTimeKey) ?? getString(syncBundleAtKey);
+    return raw != null ? DateTime.tryParse(raw) : null;
+  }
+
+  Future<void> setLastSyncTime(DateTime time) async {
+    final iso = time.toIso8601String();
+    await putString(lastSyncTimeKey, iso);
+    await putString(syncBundleAtKey, iso);
+    await putString(syncCatalogAtKey, iso);
+  }
+
+  Future<void> clearLastSyncTime() async {
+    await deleteKey(lastSyncTimeKey);
+    await deleteKey(syncBundleAtKey);
+    await deleteKey(syncCatalogAtKey);
   }
 
   /// Clears user-specific study data (used when a different account logs in).

@@ -86,7 +86,8 @@ Future<void> setupDependencies() async {
         progressRebuildService: sl<ProgressRebuildService>(),
       ));
 
-  sl.registerLazySingleton<SyncService>(() => SyncService(
+  sl.registerLazySingleton<SyncService>(() {
+    final sync = SyncService(
         store: sl<LocalStore>(),
         syncRepository: sl<SyncRepository>(),
         offlineQueue: sl<OfflineQueueService>(),
@@ -96,7 +97,11 @@ Future<void> setupDependencies() async {
         progressRebuildService: sl<ProgressRebuildService>(),
         mockTestRepository: sl<MockTestRepository>(),
         logger: sl<Logger>(),
-      ));
+      );
+    sl<OfflineQueueService>().onQueueChanged = sync.scheduleBackgroundSync;
+    sync.startConnectivityListener();
+    return sync;
+  });
 
   sl.registerLazySingleton<AuthBloc>(
       () => AuthBloc(authRepository: sl<AuthRepository>()));

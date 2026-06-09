@@ -181,7 +181,7 @@ class _AddExamWizardScreenState extends State<AddExamWizardScreen> {
       context.read<DashboardBloc>().add(DashboardResetRequested());
       final redirect = widget.isOnboarding ? '/home' : '/my-exams';
       context.go(
-        '/offline-setup?redirect=${Uri.encodeComponent(redirect)}&title=${Uri.encodeComponent('Downloading Exam Content')}',
+        '/offline-setup?mode=enrollment&redirect=${Uri.encodeComponent(redirect)}&title=${Uri.encodeComponent('Downloading Exam Content')}',
       );
     } catch (e) {
       if (!mounted) return;

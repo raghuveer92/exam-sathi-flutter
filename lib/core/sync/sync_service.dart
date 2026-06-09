@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:logger/logger.dart';
 
 import '../local/local_store.dart';
@@ -14,10 +15,11 @@ import '../../data/repositories/sync_repository.dart';
 import 'sync_download_stats.dart';
 import 'offline_queue_service.dart';
 import 'sync_progress.dart';
+import 'sync_queue_constants.dart';
 
 enum SyncStatus { idle, syncing, success, failed, offline }
 
-/// Manual-sync-only orchestrator. No automatic background sync.
+/// Offline-first sync engine — local DB is source of truth; server is backup.
 class SyncService {
   SyncService({
     required LocalStore store,
@@ -52,6 +54,9 @@ class SyncService {
   Completer<void>? _activeSync;
   SyncStatus _status = SyncStatus.idle;
   String? _lastError;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  Timer? _debounceTimer;
+  bool _wasOnline = true;
 
   SyncStatus get status => _status;
   String? get lastError => _lastError;
@@ -60,17 +65,63 @@ class SyncService {
   final _statusController = StreamController<SyncStatus>.broadcast();
   Stream<SyncStatus> get statusStream => _statusController.stream;
 
-  /// No-op — automatic sync disabled; user controls sync via SYNC button.
-  void startConnectivityListener() {}
+  /// Listens for offline → online and triggers background sync automatically.
+  void startConnectivityListener() {
+    _connectivitySub?.cancel();
+    final sub = listenForConnectivity((online) {
+      if (online && !_wasOnline) {
+        scheduleBackgroundSync();
+      } else if (!online) {
+        _setStatus(_offlineQueue.pendingCount > 0
+            ? SyncStatus.offline
+            : SyncStatus.idle);
+      }
+      _wasOnline = online;
+    });
+    if (sub != null) {
+      _connectivitySub = sub;
+    }
+  }
+
+  /// Debounced entry point — safe to call from UI, auth, or queue enqueue.
+  void scheduleBackgroundSync({bool fullDownload = false}) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 400), () {
+      unawaited(runBackgroundSync(fullDownload: fullDownload));
+    });
+  }
+
+  /// Non-blocking background sync — never throws to callers.
+  Future<void> runBackgroundSync({bool fullDownload = false}) async {
+    if (_activeSync != null) return _activeSync!.future;
+    if (!await _authRepository.isLoggedIn()) return;
+
+    if (!await isOnline()) {
+      _setStatus(_offlineQueue.pendingCount > 0
+          ? SyncStatus.offline
+          : SyncStatus.idle);
+      return;
+    }
+
+    try {
+      await _executeSync(
+        silent: true,
+        fullDownload: fullDownload,
+      );
+    } catch (e, st) {
+      _logger.w('Background sync failed', error: e, stackTrace: st);
+    }
+  }
 
   Future<void> dispose() async {
+    _debounceTimer?.cancel();
+    await _connectivitySub?.cancel();
     await _statusController.close();
   }
 
-  DateTime? get lastBundleSync {
-    final raw = _store.getString(LocalStore.syncBundleAtKey);
-    return raw != null ? DateTime.tryParse(raw) : null;
-  }
+  DateTime? get lastSyncTime => _store.getLastSyncTime();
+
+  DateTime? get lastBundleSync => lastSyncTime;
 
   Future<bool> isOnline() => isDeviceOnline();
 
@@ -96,33 +147,110 @@ class SyncService {
     ));
   }
 
-  /// First-time download after login/signup.
+  /// First-time full download after login/signup.
   Future<void> initialDownload({
     required void Function(SyncProgress progress) onProgress,
   }) async {
-    await downloadAllContent(onProgress: onProgress, incremental: false);
+    await downloadAllContent(onProgress: onProgress);
     _setStatus(SyncStatus.success);
   }
 
-  /// Full content download — used after login and after adding a new exam.
+  /// Full content download — login, reset, or explicit re-download only.
   Future<void> downloadAllContent({
     required void Function(SyncProgress progress) onProgress,
-    bool incremental = false,
   }) async {
     if (!await isOnline()) {
       throw StateError('Internet required to download exam content.');
     }
-    await _downloadAll(onProgress: onProgress, incremental: incremental);
+    await _downloadFull(onProgress: onProgress);
     _emit(SyncStep.complete, onProgress);
   }
 
-  /// User-triggered SYNC: upload pending → download latest.
-  Future<void> manualSync() async {
+  /// Download syllabus for a newly added enrollment without re-fetching everything.
+  Future<void> downloadEnrollmentContent({
+    required void Function(SyncProgress progress) onProgress,
+    int? userExamId,
+  }) async {
+    if (!await isOnline()) {
+      throw StateError('Internet required to download exam content.');
+    }
+    _emit(SyncStep.preparing, onProgress);
+
+    final incremental = lastSyncTime != null;
+    await syncBundle(incremental: incremental);
+    final catalog = await syncCatalog(incremental: incremental);
+
+    final exams = await _dashboardRepository.resolveMyExamsFromCache();
+    final targets = userExamId != null
+        ? exams.where((e) => e.id == userExamId)
+        : exams.where((e) => e.isActive);
+
+    for (final exam in targets) {
+      final subjects = await _dashboardRepository.getVisibleSubjectsByExam(
+        exam.examId,
+        forceRemote: false,
+      );
+      if (subjects.isEmpty) continue;
+
+      final subjectIds = subjects.map((s) => s.id).toList();
+      await _progressRepository.materializeSubjectDetailsFromCatalog(
+        userExamId: exam.id,
+        subjectIds: subjectIds,
+      );
+
+      final touched = catalog.affectedSubjectIds
+          .where((id) => subjectIds.contains(id))
+          .toList();
+      if (touched.isNotEmpty) {
+        await _progressRepository.refreshSubjectDetailsFromCatalog(
+          userExamId: exam.id,
+          subjectIds: touched,
+        );
+      }
+    }
+
+    await _progressRepository.applyTopicProgressForEnrollments(
+      targets.map((e) => e.id).toSet(),
+    );
+    await _progressRebuildService.rebuildExams(
+      targets.map((e) => e.examId),
+    );
+    if (catalog.serverTime != null || incremental) {
+      await _persistLastSyncTime(catalog.serverTime ?? _lastBundleServerTime);
+    }
+    _emit(SyncStep.complete, onProgress);
+  }
+
+  /// Wipes sync cursor and performs a complete re-download (profile action).
+  Future<void> resetAndRedownload({
+    required void Function(SyncProgress progress) onProgress,
+  }) async {
+    await _store.clearLastSyncTime();
+    await _store.resetInitialDownloadComplete();
+    await downloadAllContent(onProgress: onProgress);
+    await _dashboardRepository.reconcileDashboardCache();
+    await _progressRebuildService.rebuildAll();
+    await _store.markInitialDownloadComplete();
+  }
+
+  /// Force sync now — same pipeline as background sync but surfaces errors.
+  Future<void> manualSync({bool fullDownload = false}) async {
     if (_activeSync != null) return _activeSync!.future;
     if (!await isOnline()) {
       _setStatus(SyncStatus.offline);
       throw StateError('No internet connection. Connect to sync.');
     }
+    await _executeSync(silent: false, fullDownload: fullDownload);
+    if (_status == SyncStatus.failed) {
+      throw StateError(_lastError ?? 'Sync failed');
+    }
+  }
+
+  Future<void> _executeSync({
+    required bool silent,
+    required bool fullDownload,
+  }) async {
+    if (_activeSync != null) return _activeSync!.future;
 
     final completer = Completer<void>();
     _activeSync = completer;
@@ -132,27 +260,31 @@ class SyncService {
     var uploadOk = true;
     try {
       uploadOk = await _uploadPending((p) {});
-      if (uploadOk) {
-        await _downloadAll(
-          onProgress: (_) {},
-          incremental: true,
-        );
+      if (fullDownload) {
+        await downloadAllContent(onProgress: (_) {});
+        await _dashboardRepository.reconcileDashboardCache();
+        await _progressRebuildService.rebuildAll();
+        await _store.markInitialDownloadComplete();
       } else {
-        _logger.w('Skipping download — pending study changes were not uploaded');
+        await _downloadIncremental(onProgress: (_) {});
       }
       await _offlineQueue.discardResolvedActiveExamItems();
+      await _progressRepository.reconcileQueueWithSyncedState();
       _offlineQueue.refreshPendingCount();
-      if (!uploadOk) {
-        _lastError = 'Some offline changes could not be uploaded';
+      final pendingAfterSync = _offlineQueue.pendingCount;
+      if (!uploadOk || pendingAfterSync > 0) {
+        _lastError = pendingAfterSync > 0
+            ? '$pendingAfterSync change(s) still waiting to sync'
+            : 'Some offline changes could not be uploaded';
         _setStatus(SyncStatus.failed);
       } else {
         _setStatus(SyncStatus.success);
       }
     } catch (e, st) {
       _lastError = e.toString();
-      _logger.w('Manual sync failed', error: e, stackTrace: st);
+      _logger.w('Sync failed', error: e, stackTrace: st);
       _setStatus(SyncStatus.failed);
-      rethrow;
+      if (!silent) rethrow;
     } finally {
       completer.complete();
       _activeSync = null;
@@ -163,15 +295,18 @@ class SyncService {
     _emit(SyncStep.uploading, onProgress);
     var allOk = true;
 
+    await _offlineQueue.resetStuckSyncingItems();
     await _coalesceSupersededTopicProgressItems();
     await _coalescePendingStudyLogs();
 
-    for (final item in List<Map<String, dynamic>>.from(_offlineQueue.pendingItems)) {
+    for (final item
+        in List<Map<String, dynamic>>.from(_offlineQueue.processableItems)) {
       final action = item['action'] as String?;
       final type = item['type'] as String? ?? action;
       final clientId = item['clientId'] as String?;
       if (clientId == null) continue;
 
+      await _offlineQueue.updateStatus(clientId, SyncQueueStatus.syncing);
       try {
         if (action == 'SUBMIT_TEST') {
           await _mockTestRepository.flushQueuedSubmit(item);
@@ -186,22 +321,34 @@ class SyncService {
         } else if (action == 'LOG_STUDY_HOURS' || type == 'LOG_STUDY') {
           await _progressRepository.flushQueuedStudyLog(item);
         } else {
+          await _offlineQueue.updateStatus(clientId, SyncQueueStatus.pending);
           continue;
         }
         await _offlineQueue.removeByClientId(clientId);
       } catch (e, st) {
         allOk = false;
-        _logger.w('Queue item flush failed action=$action', error: e, stackTrace: st);
+        await _offlineQueue.markFailed(clientId);
+        _logger.w('Queue item flush failed action=$action',
+            error: e, stackTrace: st);
       }
     }
 
+    final purged = await _progressRepository.reconcileQueueWithSyncedState();
+    if (purged > 0) {
+      _logger.i('Purged $purged acknowledged queue item(s) after upload');
+    }
+
     final restOk = await _offlineQueue.flush();
-    return allOk && restOk;
+    final remaining = _offlineQueue.pendingCount;
+    if (remaining > 0) {
+      _logger.w('Upload finished with $remaining queue item(s) still pending');
+    }
+    return allOk && restOk && remaining == 0;
   }
 
   /// Drop older topic-progress rows when a newer row exists for the same topic.
   Future<void> _coalesceSupersededTopicProgressItems() async {
-    final pending = _offlineQueue.pendingItems;
+    final pending = _offlineQueue.processableItems;
     final latestByTopic = <String, String>{};
 
     for (final item in pending) {
@@ -245,7 +392,7 @@ class SyncService {
 
   /// Sum pending daily study-log deltas per date into one upload row.
   Future<void> _coalescePendingStudyLogs() async {
-    final pending = _offlineQueue.pendingItems;
+    final pending = _offlineQueue.processableItems;
     final sumsByDate = <String, _StudyLogAggregate>{};
 
     for (final item in pending) {
@@ -287,9 +434,68 @@ class SyncService {
     }
   }
 
-  Future<void> _downloadAll({
+  /// WhatsApp-style delta download — bundle + catalog since [lastSyncTime] only.
+  Future<void> _downloadIncremental({
     required void Function(SyncProgress progress) onProgress,
-    required bool incremental,
+  }) async {
+    _emit(SyncStep.preparing, onProgress);
+    final stats = SyncDownloadStats();
+
+    var affectedExamIds = <int>{};
+    try {
+      final progressRows = await syncBundle(incremental: true);
+      stats.studyProgressRows = progressRows;
+      affectedExamIds = _lastBundleAffectedExamIds ?? affectedExamIds;
+    } catch (e, st) {
+      _logger.w('Incremental bundle sync failed', error: e, stackTrace: st);
+      rethrow;
+    }
+
+    final catalog = await syncCatalog(incremental: true);
+    if (catalog.hadChanges && catalog.affectedSubjectIds.isNotEmpty) {
+      final exams = await _dashboardRepository.resolveMyExamsFromCache();
+      for (final exam in exams) {
+        final subjects = await _dashboardRepository.getVisibleSubjectsByExam(
+          exam.examId,
+          forceRemote: false,
+        );
+        final subjectIds = subjects.map((s) => s.id).toSet();
+        final touched = catalog.affectedSubjectIds
+            .where(subjectIds.contains)
+            .toList();
+        if (touched.isEmpty) continue;
+        await _progressRepository.refreshSubjectDetailsFromCatalog(
+          userExamId: exam.id,
+          subjectIds: touched,
+        );
+      }
+    }
+
+    final enrollmentIds = <int>{};
+    for (final exam in await _dashboardRepository.resolveMyExamsFromCache()) {
+      if (affectedExamIds.contains(exam.examId)) {
+        enrollmentIds.add(exam.id);
+      }
+    }
+    if (enrollmentIds.isNotEmpty) {
+      await _progressRepository.applyTopicProgressForEnrollments(enrollmentIds);
+    }
+
+    if (affectedExamIds.isNotEmpty) {
+      await _progressRebuildService.rebuildExams(affectedExamIds);
+    } else if (stats.studyProgressRows > 0 || catalog.hadChanges) {
+      await _progressRebuildService.rebuildAll();
+    }
+
+    await _persistLastSyncTime(catalog.serverTime ?? _lastBundleServerTime);
+    stats.log(_logger);
+  }
+
+  Set<int>? _lastBundleAffectedExamIds;
+  String? _lastBundleServerTime;
+
+  Future<void> _downloadFull({
+    required void Function(SyncProgress progress) onProgress,
   }) async {
     _emit(SyncStep.preparing, onProgress);
     final stats = SyncDownloadStats();
@@ -301,7 +507,7 @@ class SyncService {
       _logger.w('Profile refresh skipped before sync', error: e, stackTrace: st);
     }
     try {
-      stats.studyProgressRows = await syncBundle(incremental: incremental);
+      stats.studyProgressRows = await syncBundle(incremental: false);
     } catch (e, st) {
       _logger.w('Bundle sync failed, using legacy APIs', error: e, stackTrace: st);
       await syncLegacyFallback();
@@ -369,7 +575,7 @@ class SyncService {
 
     _emit(SyncStep.topics, onProgress, current: subjectCount, total: subjectCount);
 
-    await syncCatalog(incremental: incremental);
+    await syncCatalog(incremental: false);
 
     await _progressRepository.applyTopicProgressTableToSubjectDetails();
     stats.dailyStudyLogs =
@@ -411,6 +617,7 @@ class SyncService {
       await _mockTestRepository.getPerformance(forceRemote: true);
     } catch (_) {}
     await _progressRebuildService.rebuildAll();
+    await _persistLastSyncTime(null);
     stats.log(_logger);
   }
 
@@ -442,7 +649,7 @@ class SyncService {
 
   /// Returns count of ingested study_progress rows from bundle.
   Future<int> syncBundle({bool incremental = false}) async {
-    final since = incremental ? lastBundleSync : null;
+    final since = incremental ? lastSyncTime : null;
     final data = await _syncRepository.syncBundle(since: since);
 
     final dashboard = data['dashboard'];
@@ -473,17 +680,15 @@ class SyncService {
       await _store.putJson(LocalStore.myExamsKey, myExams);
     }
 
-    try {
-      await _authRepository.getMe();
-    } catch (_) {}
-
     await _dashboardRepository.reconcileDashboardCache();
 
     final progressMap = data['subjectProgressByExamId'];
+    _lastBundleAffectedExamIds = <int>{};
     if (progressMap is Map) {
       for (final entry in progressMap.entries) {
         final examId = int.tryParse(entry.key.toString());
         if (examId == null) continue;
+        _lastBundleAffectedExamIds!.add(examId);
         final remote = entry.value as List<dynamic>;
         final local = _store.getJsonList(_store.subjectProgressKey(examId));
         final merged = _dashboardRepository.mergeSubjectProgressLists(
@@ -516,25 +721,41 @@ class SyncService {
     if (changedProgress is List && changedProgress.isNotEmpty) {
       ingestedProgress =
           await _progressRepository.ingestSyncedTopicProgress(changedProgress);
+      for (final raw in changedProgress) {
+        if (raw is! Map<String, dynamic>) continue;
+        final examId = (raw['examId'] as num?)?.toInt();
+        if (examId != null) {
+          _lastBundleAffectedExamIds!.add(examId);
+        }
+      }
     }
 
     final serverTime = data['serverTime'] as String?;
-    if (serverTime != null) {
-      await _store.putString(LocalStore.syncBundleAtKey, serverTime);
+    _lastBundleServerTime = serverTime;
+    if (serverTime != null && !incremental) {
+      await _persistLastSyncTime(serverTime);
     }
     return ingestedProgress;
   }
 
-  Future<void> syncCatalog({bool incremental = false}) async {
-    final raw = _store.getString(LocalStore.syncCatalogAtKey);
-    final since = incremental && raw != null ? DateTime.tryParse(raw) : null;
+  Future<CatalogSyncResult> syncCatalog({bool incremental = false}) async {
+    final since = incremental ? lastSyncTime : null;
     final data = await _syncRepository.syncCatalog(since: since);
-    await _store.putJson(LocalStore.syncCatalogMasterKey, data);
     final serverTime = data['serverTime'] as String?;
-    if (serverTime != null) {
-      await _store.putString(LocalStore.syncCatalogAtKey, serverTime);
+
+    if (incremental && since != null) {
+      final hadChanges = _catalogDeltaHasChanges(data);
+      if (hadChanges) {
+        await _mergeCatalogDelta(data);
+      }
+      return CatalogSyncResult(
+        hadChanges: hadChanges,
+        affectedSubjectIds: _subjectIdsFromCatalogDelta(data),
+        serverTime: serverTime,
+      );
     }
 
+    await _store.putJson(LocalStore.syncCatalogMasterKey, data);
     final exams = await _dashboardRepository.resolveMyExamsFromCache();
     for (final exam in exams) {
       final subjects = await _dashboardRepository.getVisibleSubjectsByExam(
@@ -548,14 +769,140 @@ class SyncService {
         );
       }
     }
+
+    return CatalogSyncResult(
+      hadChanges: true,
+      affectedSubjectIds: _subjectIdsFromCatalogMaster(),
+      serverTime: serverTime,
+    );
+  }
+
+  Future<void> _persistLastSyncTime(String? serverTime) async {
+    final parsed = serverTime != null
+        ? DateTime.tryParse(serverTime)
+        : null;
+    await _store.setLastSyncTime(parsed ?? DateTime.now());
+  }
+
+  bool _catalogDeltaHasChanges(Map<String, dynamic> delta) {
+    for (final key in _catalogListKeys) {
+      final list = delta[key];
+      if (list is List && list.isNotEmpty) return true;
+    }
+    return false;
+  }
+
+  static const _catalogListKeys = [
+    'categories',
+    'exams',
+    'subjects',
+    'chapters',
+    'topics',
+  ];
+
+  Future<void> _mergeCatalogDelta(Map<String, dynamic> delta) async {
+    final existing = Map<String, dynamic>.from(
+      _store.getJson(LocalStore.syncCatalogMasterKey) ?? {},
+    );
+    for (final key in _catalogListKeys) {
+      _mergeJsonListById(existing, delta, key);
+    }
+    if (delta['mockTestTopicIds'] is List) {
+      existing['mockTestTopicIds'] = delta['mockTestTopicIds'];
+    }
+    if (delta['serverTime'] != null) {
+      existing['serverTime'] = delta['serverTime'];
+    }
+    await _store.putJson(LocalStore.syncCatalogMasterKey, existing);
+  }
+
+  void _mergeJsonListById(
+    Map<String, dynamic> target,
+    Map<String, dynamic> delta,
+    String key,
+  ) {
+    final deltaList = delta[key];
+    if (deltaList is! List || deltaList.isEmpty) return;
+
+    final existingList = (target[key] as List?)
+            ?.whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList() ??
+        [];
+    final byId = <int, Map<String, dynamic>>{
+      for (final row in existingList)
+        if (row['id'] is num) (row['id'] as num).toInt(): row,
+    };
+    for (final raw in deltaList) {
+      if (raw is! Map) continue;
+      final id = raw['id'];
+      if (id is! num) continue;
+      byId[id.toInt()] = Map<String, dynamic>.from(raw);
+    }
+    target[key] = byId.values.toList();
+  }
+
+  Set<int> _subjectIdsFromCatalogDelta(Map<String, dynamic> delta) {
+    final ids = <int>{};
+    final subjects = delta['subjects'];
+    if (subjects is List) {
+      for (final raw in subjects) {
+        if (raw is Map && raw['id'] is num) {
+          ids.add((raw['id'] as num).toInt());
+        }
+      }
+    }
+    final chapters = delta['chapters'];
+    if (chapters is List) {
+      for (final raw in chapters) {
+        if (raw is Map && raw['subjectId'] is num) {
+          ids.add((raw['subjectId'] as num).toInt());
+        }
+      }
+    }
+    final topics = delta['topics'];
+    if (topics is List) {
+      final catalog = _store.getJson(LocalStore.syncCatalogMasterKey);
+      final chapterList = catalog?['chapters'];
+      final chapterSubject = <int, int>{};
+      if (chapterList is List) {
+        for (final raw in chapterList) {
+          if (raw is Map &&
+              raw['id'] is num &&
+              raw['subjectId'] is num) {
+            chapterSubject[(raw['id'] as num).toInt()] =
+                (raw['subjectId'] as num).toInt();
+          }
+        }
+      }
+      for (final raw in topics) {
+        if (raw is Map && raw['chapterId'] is num) {
+          final subjectId =
+              chapterSubject[(raw['chapterId'] as num).toInt()];
+          if (subjectId != null) ids.add(subjectId);
+        }
+      }
+    }
+    return ids;
+  }
+
+  Set<int> _subjectIdsFromCatalogMaster() {
+    final catalog = _store.getJson(LocalStore.syncCatalogMasterKey);
+    final subjects = catalog?['subjects'];
+    if (subjects is! List) return {};
+    return subjects
+        .whereType<Map>()
+        .where((s) => s['id'] is num)
+        .map((s) => (s['id'] as num).toInt())
+        .toSet();
   }
 
   /// Deprecated — use [manualSync]. Kept for compatibility.
   Future<void> refreshAll({bool force = true}) => manualSync();
 
-  /// Deprecated — no automatic sync.
+  /// Deprecated — use [runBackgroundSync] or [scheduleBackgroundSync].
   Future<void> fullInitialSync({bool incremental = false, bool force = false}) =>
-      manualSync();
+      runBackgroundSync(fullDownload: !incremental);
 }
 
 class _StudyLogAggregate {
@@ -564,4 +911,16 @@ class _StudyLogAggregate {
   final clientIds = <String?>[];
   String? keepClientId;
   Map<String, dynamic>? payloadTemplate;
+}
+
+class CatalogSyncResult {
+  final bool hadChanges;
+  final Set<int> affectedSubjectIds;
+  final String? serverTime;
+
+  const CatalogSyncResult({
+    required this.hadChanges,
+    required this.affectedSubjectIds,
+    this.serverTime,
+  });
 }

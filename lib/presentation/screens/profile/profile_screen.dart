@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/sync/sync_service.dart';
 import '../../../core/utils/responsive_helper.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
@@ -94,6 +96,12 @@ class ProfileScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 _ProfileTile(
+                  icon: Icons.refresh_rounded,
+                  label: 'Reset & Re-download',
+                  onTap: () => _confirmResetDownload(context),
+                ),
+                const SizedBox(height: 16),
+                _ProfileTile(
                   icon: Icons.school_outlined,
                   label: 'My Exams',
                   onTap: () => context.go('/my-exams'),
@@ -126,6 +134,62 @@ class ProfileScreen extends StatelessWidget {
         },
       ),
     );
+  }
+
+  Future<void> _confirmResetDownload(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reset & Re-download?'),
+        content: const Text(
+          'This clears the sync cursor and downloads all exam content again. '
+          'Your local study progress is kept unless the server differs.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Re-download'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 20),
+            Expanded(child: Text('Downloading all content…')),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      await GetIt.I<SyncService>().resetAndRedownload(
+        onProgress: (_) {},
+      );
+      if (!context.mounted) return;
+      Navigator.pop(context);
+      context.read<DashboardBloc>().add(DashboardLoadRequested());
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Full re-download complete')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Re-download failed: $e')),
+      );
+    }
   }
 }
 

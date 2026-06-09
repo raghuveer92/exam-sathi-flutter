@@ -87,7 +87,7 @@ class AppRouter {
 
         if (isSplash || loc == '/login' || loc == '/register') {
           if (!user.hasExamGoal) return '/add-exam?onboarding=1';
-          if (!downloadDone && loc != '/offline-setup') return '/offline-setup';
+          if (!downloadDone) return '/offline-setup';
           return '/home';
         }
 
@@ -100,6 +100,7 @@ class AppRouter {
                 (isSelectExam && !isChangeExamFlow) ||
                 isOnboardingMyExams ||
                 isOnboardingWizard)) {
+          if (!downloadDone) return '/offline-setup';
           return '/home';
         }
         if (!user.hasSelectedExam && loc == '/exam-goal') {
@@ -134,11 +135,17 @@ class AppRouter {
       GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
       GoRoute(
         path: '/offline-setup',
-        builder: (_, state) => OfflineSetupScreen(
-          redirectPath: state.uri.queryParameters['redirect'] ?? '/home',
-          title: state.uri.queryParameters['title'] ??
-              'Preparing Offline Content',
-        ),
+        builder: (_, state) {
+          final params = state.uri.queryParameters;
+          final userExamRaw = params['userExamId'];
+          return OfflineSetupScreen(
+            redirectPath: params['redirect'] ?? '/home',
+            title: params['title'] ?? 'Preparing Offline Content',
+            enrollmentOnly: params['mode'] == 'enrollment',
+            userExamId:
+                userExamRaw != null ? int.tryParse(userExamRaw) : null,
+          );
+        },
       ),
       GoRoute(
         path: '/select-exam',

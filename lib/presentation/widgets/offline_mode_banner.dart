@@ -3,7 +3,7 @@ import 'package:get_it/get_it.dart';
 
 import '../../core/sync/offline_queue_service.dart';
 
-/// Shows pending sync count — offline-first mode is normal, not an error.
+/// Subtle banner when changes are queued — sync runs automatically in background.
 class OfflineModeBanner extends StatelessWidget {
   const OfflineModeBanner({super.key});
 
@@ -20,16 +20,16 @@ class OfflineModeBanner extends StatelessWidget {
           child: SafeArea(
             bottom: false,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
               child: Row(
                 children: [
                   const Icon(Icons.cloud_upload_outlined,
-                      color: Colors.white, size: 18),
+                      color: Colors.white, size: 16),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '$pending change${pending == 1 ? '' : 's'} waiting to sync — tap SYNC when online',
-                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      '$pending change${pending == 1 ? '' : 's'} will sync automatically when online',
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
                     ),
                   ),
                 ],

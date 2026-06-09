@@ -9,7 +9,9 @@ import 'package:go_router/go_router.dart';
 import 'core/di/injection_container.dart';
 import 'core/firebase/analytics_service.dart';
 import 'core/firebase/firebase_initializer.dart';
+import 'core/local/local_store.dart';
 import 'core/router/app_router.dart';
+import 'core/sync/sync_service.dart';
 import 'core/theme/app_theme.dart';
 import 'presentation/blocs/auth/auth_bloc.dart';
 import 'presentation/blocs/dashboard/dashboard_bloc.dart';
@@ -80,6 +82,11 @@ class _ExamSaathiAppState extends State<ExamSaathiApp> {
           if (state is AuthUnauthenticated) {
             context.read<DashboardBloc>().add(DashboardResetRequested());
             AnalyticsService.logLogout();
+          }
+          if (state is AuthAuthenticated) {
+            if (GetIt.I<LocalStore>().isInitialDownloadComplete()) {
+              GetIt.I<SyncService>().scheduleBackgroundSync();
+            }
           }
         },
         child: MaterialApp.router(

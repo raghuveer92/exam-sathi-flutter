@@ -22,6 +22,8 @@ _TopicStatus _statusOf(TopicModel t) {
   return _TopicStatus.notStarted;
 }
 
+bool _isSelectable(TopicModel t) => _statusOf(t) != _TopicStatus.completed;
+
 String _fmtH(double h) {
   final s = h.toStringAsFixed(1);
   return s.endsWith('.0') ? '${h.toInt()}h' : '${s}h';
@@ -119,7 +121,9 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     setState(() {
       _selectionMode = true;
       _selectedTopicIds.clear();
-      if (initial != null) _selectedTopicIds.add(initial.id);
+      if (initial != null && _isSelectable(initial)) {
+        _selectedTopicIds.add(initial.id);
+      }
     });
   }
 
@@ -132,6 +136,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
   }
 
   void _toggleTopicSelection(TopicModel topic) {
+    if (!_isSelectable(topic)) return;
     setState(() {
       if (_selectedTopicIds.contains(topic.id)) {
         _selectedTopicIds.remove(topic.id);
@@ -144,6 +149,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
 
   void _onTopicTap(TopicModel topic) {
     if (_selectionMode) {
+      if (!_isSelectable(topic)) return;
       _toggleTopicSelection(topic);
       return;
     }
@@ -155,6 +161,10 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
   }
 
   void _onTopicLongPress(TopicModel topic) {
+    if (!_isSelectable(topic)) {
+      if (!_selectionMode) _showCompletedTopicSheet(topic);
+      return;
+    }
     if (!_selectionMode) {
       _enterSelectionMode(topic);
     } else {
@@ -339,7 +349,6 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
       ),
       bottomNavigationBar: _selectedTopicIds.isNotEmpty
           ? _TopicSelectionPanel(
-              selectedCount: _selectedTopicIds.length,
               studyHours: _selectionStudyHours,
               isSaving: _bulkSaving,
               subjectColor: color,
@@ -429,6 +438,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
                           topic: topic,
                           subjectColor: color,
                           selectionMode: _selectionMode,
+                          isSelectable: _isSelectable(topic),
                           isSelected: _selectedTopicIds.contains(topic.id),
                           onTap: () => _onTopicTap(topic),
                           onLongPress: () => _onTopicLongPress(topic),
@@ -688,6 +698,7 @@ class _TopicTile extends StatelessWidget {
   final TopicModel topic;
   final Color subjectColor;
   final bool selectionMode;
+  final bool isSelectable;
   final bool isSelected;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
@@ -697,6 +708,7 @@ class _TopicTile extends StatelessWidget {
     required this.topic,
     required this.subjectColor,
     required this.selectionMode,
+    required this.isSelectable,
     required this.isSelected,
     required this.onTap,
     required this.onLongPress,
@@ -716,6 +728,13 @@ class _TopicTile extends StatelessWidget {
   }
 
   Widget _leadingIcon(_TopicStatus status) {
+    if (status == _TopicStatus.completed) {
+      return const Icon(
+        Icons.check_circle_rounded,
+        color: Color(0xFF43A047),
+        size: 20,
+      );
+    }
     if (selectionMode) {
       return SizedBox(
         width: 22,
@@ -727,13 +746,6 @@ class _TopicTile extends StatelessWidget {
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           visualDensity: VisualDensity.compact,
         ),
-      );
-    }
-    if (status == _TopicStatus.completed) {
-      return const Icon(
-        Icons.check_circle_rounded,
-        color: Color(0xFF43A047),
-        size: 20,
       );
     }
     return Container(
@@ -749,15 +761,18 @@ class _TopicTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = _statusOf(topic);
+    final completed = status == _TopicStatus.completed;
 
     return Material(
       color: isSelected ? subjectColor.withValues(alpha: 0.06) : Colors.white,
       borderRadius: BorderRadius.circular(12),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: Container(
+        onTap: isSelectable ? onTap : null,
+        onLongPress: isSelectable ? onLongPress : null,
+        child: Opacity(
+          opacity: selectionMode && completed ? 0.55 : 1,
+          child: Container(
           height: 76,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
@@ -788,7 +803,7 @@ class _TopicTile extends StatelessWidget {
                     ),
                   ),
                   Icon(
-                    selectionMode
+                    selectionMode && isSelectable
                         ? (isSelected
                             ? Icons.check_circle_rounded
                             : Icons.radio_button_unchecked_rounded)
@@ -827,6 +842,7 @@ class _TopicTile extends StatelessWidget {
             ],
           ),
         ),
+        ),
       ),
     );
   }
@@ -837,7 +853,6 @@ class _TopicSelectionPanel extends StatelessWidget {
   static const _ctaHeight = 46.0;
   static const _stepperMaxWidth = 132.0;
 
-  final int selectedCount;
   final double studyHours;
   final bool isSaving;
   final Color subjectColor;
@@ -846,7 +861,6 @@ class _TopicSelectionPanel extends StatelessWidget {
   final VoidCallback onMarkCompleted;
 
   const _TopicSelectionPanel({
-    required this.selectedCount,
     required this.studyHours,
     required this.isSaving,
     required this.subjectColor,
@@ -877,15 +891,8 @@ class _TopicSelectionPanel extends StatelessWidget {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 380;
-            final horizontalPad = compact ? 10.0 : 12.0;
+            final horizontalPad = compact ? 12.0 : 16.0;
             final stepperWidth = compact ? 118.0 : _stepperMaxWidth;
-            final dividerGap = compact ? 8.0 : 10.0;
-            final countStyle = TextStyle(
-              fontSize: compact ? 15 : 17,
-              fontWeight: FontWeight.w500,
-              color: AppColors.textPrimary,
-              letterSpacing: -0.2,
-            );
 
             return Padding(
               padding: EdgeInsets.fromLTRB(
@@ -898,16 +905,6 @@ class _TopicSelectionPanel extends StatelessWidget {
                 height: _barHeight,
                 child: Row(
                   children: [
-                    Flexible(
-                      flex: 0,
-                      child: Text(
-                        '$selectedCount Selected',
-                        style: countStyle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    _SectionDivider(gap: dividerGap),
                     SizedBox(
                       width: stepperWidth,
                       child: Row(
@@ -938,7 +935,7 @@ class _TopicSelectionPanel extends StatelessWidget {
                         ],
                       ),
                     ),
-                    _SectionDivider(gap: dividerGap),
+                    SizedBox(width: compact ? 10 : 14),
                     Expanded(
                       child: SizedBox(
                         height: _ctaHeight,
@@ -949,9 +946,7 @@ class _TopicSelectionPanel extends StatelessWidget {
                             disabledBackgroundColor:
                                 AppColors.success.withValues(alpha: 0.45),
                             elevation: 0,
-                            padding: EdgeInsets.symmetric(
-                              horizontal: compact ? 8 : 12,
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
@@ -965,12 +960,12 @@ class _TopicSelectionPanel extends StatelessWidget {
                                     color: Colors.white,
                                   ),
                                 )
-                              : Text(
+                              : const Text(
                                   'Mark Completed',
                                   maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                  overflow: TextOverflow.visible,
                                   style: TextStyle(
-                                    fontSize: compact ? 14 : 15,
+                                    fontSize: 15,
                                     fontWeight: FontWeight.w700,
                                     letterSpacing: -0.1,
                                   ),
@@ -985,22 +980,6 @@ class _TopicSelectionPanel extends StatelessWidget {
           },
         ),
       ),
-    );
-  }
-}
-
-class _SectionDivider extends StatelessWidget {
-  final double gap;
-
-  const _SectionDivider({this.gap = 10});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 28,
-      margin: EdgeInsets.symmetric(horizontal: gap),
-      color: AppColors.divider,
     );
   }
 }
