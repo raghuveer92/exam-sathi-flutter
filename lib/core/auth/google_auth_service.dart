@@ -21,7 +21,8 @@ class GoogleAuthService {
 
     await GoogleSignIn.instance.initialize(
       clientId: kIsWeb ? GoogleAuthConfig.webClientId : null,
-      serverClientId: GoogleAuthConfig.webClientId,
+      // serverClientId is Android/iOS only — web asserts if this is set.
+      serverClientId: kIsWeb ? null : GoogleAuthConfig.webClientId,
     );
     _initialized = true;
   }
