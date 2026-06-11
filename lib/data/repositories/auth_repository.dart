@@ -80,6 +80,19 @@ class AuthRepository {
     await _store.clearLastSyncTime();
   }
 
+  /// Permanently deletes the account on the server and wipes all local data.
+  Future<void> deleteAccount(String password) async {
+    await _client.dio.delete(
+      ApiEndpoints.me,
+      data: {'password': password},
+    );
+    await _client.clearToken();
+    await _store.clearUserStudyData();
+    await _store.deleteKey(LocalStore.cachedUserIdKey);
+    await _store.resetInitialDownloadComplete();
+    await _store.clearLastSyncTime();
+  }
+
   Future<bool> isLoggedIn() => _client.hasToken();
 
   /// Offline-first session restore: token + cached profile (or dashboard user).

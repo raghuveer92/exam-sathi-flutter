@@ -18,6 +18,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<AuthLoginRequested>(_onLoginRequested);
     on<AuthRegisterRequested>(_onRegisterRequested);
     on<AuthLogoutRequested>(_onLogoutRequested);
+    on<AuthDeleteAccountRequested>(_onDeleteAccountRequested);
     on<AuthUserUpdated>((event, emit) => emit(AuthAuthenticated(user: event.user)));
   }
 
@@ -103,9 +104,28 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     emit(AuthUnauthenticated());
   }
 
+  Future<void> _onDeleteAccountRequested(
+    AuthDeleteAccountRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      await _authRepository.deleteAccount(event.password);
+      emit(AuthUnauthenticated());
+    } catch (e) {
+      emit(AuthError(message: _parseError(e)));
+    }
+  }
+
   String _parseError(Object e) {
-    if (e is DioException && e.message != null && e.message!.isNotEmpty) {
-      return e.message!;
+    if (e is DioException) {
+      final data = e.response?.data;
+      if (data is Map && data['message'] is String) {
+        return data['message'] as String;
+      }
+      if (e.message != null && e.message!.isNotEmpty) {
+        return e.message!;
+      }
     }
     final s = e.toString();
     if (s.contains('Exception: ')) return s.split('Exception: ').last.trim();

@@ -33,6 +33,13 @@ class AuthRegisterRequested extends AuthEvent {
 
 class AuthLogoutRequested extends AuthEvent {}
 
+class AuthDeleteAccountRequested extends AuthEvent {
+  final String password;
+  const AuthDeleteAccountRequested({required this.password});
+  @override
+  List<Object?> get props => [];
+}
+
 /// Locally updates the authenticated user without a network round-trip.
 /// Use after mutations (selectExam, setExamGoal) to keep router state in sync.
 class AuthUserUpdated extends AuthEvent {

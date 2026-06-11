@@ -118,6 +118,12 @@ class ProfileScreen extends StatelessWidget {
                 ),
                 const Divider(height: 24),
                 _ProfileTile(
+                  icon: Icons.delete_forever_outlined,
+                  label: 'Delete Account',
+                  color: AppColors.error,
+                  onTap: () => _confirmDeleteAccount(context),
+                ),
+                _ProfileTile(
                   icon: Icons.logout_rounded,
                   label: 'Logout',
                   color: AppColors.error,
@@ -190,6 +196,94 @@ class ProfileScreen extends StatelessWidget {
         SnackBar(content: Text('Re-download failed: $e')),
       );
     }
+  }
+
+  Future<void> _confirmDeleteAccount(BuildContext context) async {
+    final passwordController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete account?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'This permanently deletes your account, exam enrollments, '
+              'study progress, and test history. This cannot be undone.',
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: passwordController,
+              obscureText: true,
+              autofillHints: const [AutofillHints.password],
+              decoration: const InputDecoration(
+                labelText: 'Confirm your password',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete account'),
+          ),
+        ],
+      ),
+    );
+    final password = passwordController.text;
+    passwordController.dispose();
+    if (confirmed != true || password.isEmpty || !context.mounted) {
+      if (confirmed == true && password.isEmpty && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Enter your password to continue')),
+        );
+      }
+      return;
+    }
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 20),
+            Expanded(child: Text('Deleting account…')),
+          ],
+        ),
+      ),
+    );
+
+    final authBloc = context.read<AuthBloc>();
+    final resultFuture = authBloc.stream.firstWhere(
+      (state) => state is AuthUnauthenticated || state is AuthError,
+    );
+    authBloc.add(AuthDeleteAccountRequested(password: password));
+    await resultFuture;
+
+    if (!context.mounted) return;
+    Navigator.pop(context);
+
+    final state = authBloc.state;
+    if (state is AuthError) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(state.message)),
+      );
+      return;
+    }
+
+    context.go('/login');
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Your account has been deleted')),
+    );
   }
 }
 
