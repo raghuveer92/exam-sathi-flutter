@@ -48,8 +48,13 @@ class _LoginScreenState extends State<LoginScreen> {
       _passwordCtrl.text = 'Abc@123';
     }
     if (kIsWeb && GoogleAuthConfig.isConfigured) {
-      final googleAuth = GetIt.I<GoogleAuthService>();
-      _googleWebSub = googleAuth.listenForWebSignIn(
+      unawaited(_setupWebGoogleSignIn());
+    }
+  }
+
+  Future<void> _setupWebGoogleSignIn() async {
+    final googleAuth = GetIt.I<GoogleAuthService>();
+    _googleWebSub = await googleAuth.listenForWebSignIn(
         onSignedIn: (idToken) {
           if (!mounted) return;
           context.read<AuthBloc>().add(AuthGoogleSignInWithIdToken(idToken));
@@ -64,7 +69,6 @@ class _LoginScreenState extends State<LoginScreen> {
           );
         },
       );
-    }
   }
 
   @override

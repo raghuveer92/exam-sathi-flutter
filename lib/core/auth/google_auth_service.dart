@@ -8,17 +8,21 @@ import 'google_auth_config.dart';
 /// Wraps Google Sign-In and returns an idToken for backend verification.
 class GoogleAuthService {
   bool _initialized = false;
+  Future<void>? _initFuture;
   StreamSubscription<GoogleSignInAuthenticationEvent>? _webAuthSub;
 
   bool get isAvailable => GoogleAuthConfig.isConfigured;
 
-  /// Call once at app startup (required on web for GIS SDK).
+  /// Call once before renderButton or authenticationEvents (web + mobile).
   Future<void> initialize() => _ensureInitialized();
 
-  Future<void> _ensureInitialized() async {
-    if (_initialized) return;
-    if (!isAvailable) return;
+  Future<void> _ensureInitialized() {
+    if (!isAvailable) return Future.value();
+    if (_initialized) return Future.value();
+    return _initFuture ??= _initOnce();
+  }
 
+  Future<void> _initOnce() async {
     await GoogleSignIn.instance.initialize(
       clientId: kIsWeb ? GoogleAuthConfig.webClientId : null,
       // serverClientId is Android/iOS only — web asserts if this is set.
@@ -55,14 +59,15 @@ class GoogleAuthService {
   }
 
   /// Web: listen while a login/register screen is visible.
-  StreamSubscription<GoogleSignInAuthenticationEvent> listenForWebSignIn({
+  Future<StreamSubscription<GoogleSignInAuthenticationEvent>>
+      listenForWebSignIn({
     required void Function(String idToken) onSignedIn,
     void Function(Object error)? onError,
-  }) {
+  }) async {
     assert(kIsWeb, 'listenForWebSignIn is web-only');
-    unawaited(_ensureInitialized());
+    await _ensureInitialized();
 
-    _webAuthSub?.cancel();
+    await _webAuthSub?.cancel();
     _webAuthSub = GoogleSignIn.instance.authenticationEvents.listen(
       (event) {
         if (event is GoogleSignInAuthenticationEventSignIn) {
