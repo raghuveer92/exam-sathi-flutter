@@ -23,9 +23,13 @@ Object? _semanticsHandle;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-  SystemChrome.setSystemUIOverlayStyle(AppTheme.lightScreenOverlay);
-  _semanticsHandle ??= WidgetsBinding.instance.ensureSemantics();
+
+  // SystemChrome APIs throw UnimplementedError on web (async, uncaught in release).
+  if (!kIsWeb) {
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setSystemUIOverlayStyle(AppTheme.lightScreenOverlay);
+    _semanticsHandle ??= WidgetsBinding.instance.ensureSemantics();
+  }
 
   // Catch all Flutter framework errors and show them on-screen
   FlutterError.onError = (details) {
@@ -100,10 +104,15 @@ class _ExamSaathiAppState extends State<ExamSaathiApp> {
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme,
           routerConfig: _router,
-          builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
-            value: AppTheme.lightScreenOverlay,
-            child: child ?? const SizedBox.shrink(),
-          ),
+          builder: (context, child) {
+            if (kIsWeb) {
+              return child ?? const SizedBox.shrink();
+            }
+            return AnnotatedRegion<SystemUiOverlayStyle>(
+              value: AppTheme.lightScreenOverlay,
+              child: child ?? const SizedBox.shrink(),
+            );
+          },
         ),
       ),
     );

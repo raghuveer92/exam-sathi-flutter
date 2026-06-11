@@ -1,20 +1,23 @@
+import 'dart:async';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:get_it/get_it.dart';
 import 'package:logger/logger.dart';
 
+import '../auth/google_auth_config.dart';
+import '../auth/google_auth_service.dart';
+import '../local/local_store.dart';
+import '../network/api_client.dart';
+import '../study/daily_target_calculator.dart';
+import '../sync/offline_queue_service.dart';
+import '../sync/progress_rebuild_service.dart';
+import '../sync/sync_service.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../data/repositories/dashboard_repository.dart';
 import '../../data/repositories/exam_catalog_repository.dart';
 import '../../data/repositories/mock_test_repository.dart';
 import '../../data/repositories/progress_repository.dart';
 import '../../data/repositories/sync_repository.dart';
-import '../local/local_store.dart';
-import '../auth/google_auth_service.dart';
-import '../network/api_client.dart';
-import '../study/daily_target_calculator.dart';
-import '../sync/offline_queue_service.dart';
-import '../sync/progress_rebuild_service.dart';
-import '../sync/sync_service.dart';
 import '../../presentation/blocs/auth/auth_bloc.dart';
 import '../../presentation/blocs/dashboard/dashboard_bloc.dart';
 
@@ -54,7 +57,10 @@ Future<void> setupDependencies() async {
   });
 
   sl.registerLazySingleton<GoogleAuthService>(() => GoogleAuthService());
-  await sl<GoogleAuthService>().initialize();
+  // Lazy — do not block app startup if GIS script is slow/unavailable.
+  if (GoogleAuthConfig.isConfigured) {
+    unawaited(sl<GoogleAuthService>().initialize().catchError((_) {}));
+  }
 
   sl.registerLazySingleton<AuthRepository>(() => AuthRepository(
         client: sl<ApiClient>(),
