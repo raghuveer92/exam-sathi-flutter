@@ -9,6 +9,7 @@ import '../../data/repositories/mock_test_repository.dart';
 import '../../data/repositories/progress_repository.dart';
 import '../../data/repositories/sync_repository.dart';
 import '../local/local_store.dart';
+import '../auth/google_auth_service.dart';
 import '../network/api_client.dart';
 import '../study/daily_target_calculator.dart';
 import '../sync/offline_queue_service.dart';
@@ -52,9 +53,13 @@ Future<void> setupDependencies() async {
     return queue;
   });
 
+  sl.registerLazySingleton<GoogleAuthService>(() => GoogleAuthService());
+  await sl<GoogleAuthService>().initialize();
+
   sl.registerLazySingleton<AuthRepository>(() => AuthRepository(
         client: sl<ApiClient>(),
         store: sl<LocalStore>(),
+        googleAuth: sl<GoogleAuthService>(),
       ));
   sl.registerLazySingleton<DashboardRepository>(() => DashboardRepository(
         client: sl<ApiClient>(),

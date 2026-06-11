@@ -1,5 +1,6 @@
 
 import '../models/user_model.dart';
+import '../../core/auth/google_auth_service.dart';
 import '../../core/local/local_store.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
@@ -7,12 +8,15 @@ import '../../core/network/api_endpoints.dart';
 class AuthRepository {
   final ApiClient _client;
   final LocalStore _store;
+  final GoogleAuthService _googleAuth;
 
   AuthRepository({
     required ApiClient client,
     required LocalStore store,
+    required GoogleAuthService googleAuth,
   })  : _client = client,
-        _store = store;
+        _store = store,
+        _googleAuth = googleAuth;
 
   Future<Map<String, dynamic>> login(String email, String password) async {
     final response = await _client.dio.post(
@@ -50,6 +54,27 @@ class AuthRepository {
     return data;
   }
 
+  Future<Map<String, dynamic>> signInWithGoogle() async {
+    final idToken = await _googleAuth.signInAndGetIdToken();
+    if (idToken == null) {
+      throw StateError('Google Sign-In was cancelled');
+    }
+    return signInWithGoogleIdToken(idToken);
+  }
+
+  Future<Map<String, dynamic>> signInWithGoogleIdToken(String idToken) async {
+    final response = await _client.dio.post(
+      ApiEndpoints.googleSignIn,
+      data: {'idToken': idToken},
+    );
+    final body = response.data as Map<String, dynamic>;
+    final data = body['data'] as Map<String, dynamic>;
+    await _client.saveToken(data['accessToken'] as String);
+    final user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
+    await cacheUser(user);
+    return data;
+  }
+
   Future<UserModel> getMe() async {
     final response = await _client.dio.get(ApiEndpoints.me);
     final user = UserModel.fromJson(response.data['data'] as Map<String, dynamic>);
@@ -74,6 +99,7 @@ class AuthRepository {
   }
 
   Future<void> logout() async {
+    await _googleAuth.signOut();
     await _client.clearToken();
     await _store.deleteKey(LocalStore.userProfileKey);
     await _store.resetInitialDownloadComplete();

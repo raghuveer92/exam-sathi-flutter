@@ -10,6 +10,7 @@ class ApiEndpoints {
   // Auth
   static const String register = '/auth/register';
   static const String login = '/auth/login';
+  static const String googleSignIn = '/auth/google';
 
   // Student
   static const String me = '/student/me';

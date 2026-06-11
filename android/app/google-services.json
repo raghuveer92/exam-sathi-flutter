@@ -12,7 +12,20 @@
           "package_name": "com.examsaathi.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "705998749535-k8bolj448ag0es1rsg0njiqfd128m7ph.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.examsaathi.app",
+            "certificate_hash": "c974a521a150c6618cb659b887ae80d7546b9f5b"
+          }
+        },
+        {
+          "client_id": "705998749535-rg78efbe1kr64rppef6fd6vnpu98vvdj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBZHwL4n3ier1gewZKAkc8f3R1y_3N10Fs"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "705998749535-rg78efbe1kr64rppef6fd6vnpu98vvdj.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

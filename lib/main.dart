@@ -1,11 +1,14 @@
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_adsense/flutter_adsense.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
+import 'core/ads/ad_config.dart';
 import 'core/di/injection_container.dart';
 import 'core/firebase/analytics_service.dart';
 import 'core/firebase/firebase_initializer.dart';
@@ -36,6 +39,9 @@ void main() async {
   };
 
   try {
+    if (kIsWeb && AdConfig.hasManualRail) {
+      FlutterAdsense().initialize(AdConfig.clientId);
+    }
     await FirebaseInitializer.initialize();
     AnalyticsService.logAppOpen();
     await setupDependencies();

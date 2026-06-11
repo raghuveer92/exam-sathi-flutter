@@ -33,6 +33,16 @@ class AuthRegisterRequested extends AuthEvent {
 
 class AuthLogoutRequested extends AuthEvent {}
 
+class AuthGoogleSignInRequested extends AuthEvent {}
+
+/// Web GIS button completed — exchange idToken with backend.
+class AuthGoogleSignInWithIdToken extends AuthEvent {
+  final String idToken;
+  const AuthGoogleSignInWithIdToken(this.idToken);
+  @override
+  List<Object?> get props => [idToken];
+}
+
 class AuthDeleteAccountRequested extends AuthEvent {
   final String password;
   const AuthDeleteAccountRequested({required this.password});

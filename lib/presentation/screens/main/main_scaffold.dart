@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/responsive_helper.dart';
+import '../../widgets/ads/web_ad_rail.dart';
 
 /// Main scaffold — bottom navigation on mobile/tablet, sidebar on desktop.
 class MainScaffold extends StatelessWidget {
@@ -41,6 +42,7 @@ class MainScaffold extends StatelessWidget {
               ),
               const VerticalDivider(width: 1, color: AppColors.divider),
               Expanded(child: child),
+              if (WebAdRail.shouldShow(context)) const WebAdRail(),
             ],
           ),
         ),

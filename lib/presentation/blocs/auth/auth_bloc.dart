@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../../data/models/user_model.dart';
 import '../../../data/repositories/auth_repository.dart';
@@ -18,6 +19,8 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<AuthLoginRequested>(_onLoginRequested);
     on<AuthRegisterRequested>(_onRegisterRequested);
     on<AuthLogoutRequested>(_onLogoutRequested);
+    on<AuthGoogleSignInRequested>(_onGoogleSignInRequested);
+    on<AuthGoogleSignInWithIdToken>(_onGoogleSignInWithIdToken);
     on<AuthDeleteAccountRequested>(_onDeleteAccountRequested);
     on<AuthUserUpdated>((event, emit) => emit(AuthAuthenticated(user: event.user)));
   }
@@ -104,6 +107,39 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     emit(AuthUnauthenticated());
   }
 
+  Future<void> _onGoogleSignInRequested(
+    AuthGoogleSignInRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      final data = await _authRepository.signInWithGoogle();
+      final user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
+      emit(AuthAuthenticated(user: user));
+    } catch (e) {
+      final message = e.toString();
+      if (message.contains('cancelled') || message.contains('canceled')) {
+        emit(AuthUnauthenticated());
+        return;
+      }
+      emit(AuthError(message: _parseError(e)));
+    }
+  }
+
+  Future<void> _onGoogleSignInWithIdToken(
+    AuthGoogleSignInWithIdToken event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      final data = await _authRepository.signInWithGoogleIdToken(event.idToken);
+      final user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
+      emit(AuthAuthenticated(user: user));
+    } catch (e) {
+      emit(AuthError(message: _parseError(e)));
+    }
+  }
+
   Future<void> _onDeleteAccountRequested(
     AuthDeleteAccountRequested event,
     Emitter<AuthState> emit,
@@ -127,8 +163,18 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         return e.message!;
       }
     }
+    if (e is GoogleSignInException) {
+      if (e.code == GoogleSignInExceptionCode.canceled) {
+        return 'Sign in canceled';
+      }
+      return e.description ?? 'Google Sign-In failed (${e.code.name})';
+    }
+    if (e is StateError) {
+      return e.message;
+    }
     final s = e.toString();
     if (s.contains('Exception: ')) return s.split('Exception: ').last.trim();
+    if (s.startsWith('Bad state: ')) return s.substring('Bad state: '.length);
     return 'Something went wrong. Please try again.';
   }
 }
