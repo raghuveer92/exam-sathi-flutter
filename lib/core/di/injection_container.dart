@@ -1,10 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:get_it/get_it.dart';
 import 'package:logger/logger.dart';
 
-import '../auth/google_auth_config.dart';
 import '../auth/google_auth_service.dart';
 import '../local/local_store.dart';
 import '../network/api_client.dart';
@@ -57,10 +54,6 @@ Future<void> setupDependencies() async {
   });
 
   sl.registerLazySingleton<GoogleAuthService>(() => GoogleAuthService());
-  // Lazy — do not block app startup if GIS script is slow/unavailable.
-  if (GoogleAuthConfig.isConfigured) {
-    unawaited(sl<GoogleAuthService>().initialize().catchError((_) {}));
-  }
 
   sl.registerLazySingleton<AuthRepository>(() => AuthRepository(
         client: sl<ApiClient>(),
