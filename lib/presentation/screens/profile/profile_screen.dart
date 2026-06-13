@@ -1,14 +1,20 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/auth/google_auth_config.dart';
+import '../../../core/auth/google_auth_service.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/sync/sync_service.dart';
 import '../../../core/utils/responsive_helper.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
 import '../../widgets/manual_sync_button.dart';
+import '../../widgets/common/google_sign_in_button.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -199,6 +205,71 @@ class ProfileScreen extends StatelessWidget {
   }
 
   Future<void> _confirmDeleteAccount(BuildContext context) async {
+    final authState = context.read<AuthBloc>().state;
+    final dashboardState = context.read<DashboardBloc>().state;
+    final authUser = authState is AuthAuthenticated ? authState.user : null;
+    final dashboardUser =
+        dashboardState is DashboardLoaded ? dashboardState.dashboard.user : null;
+    final isGoogleAccount =
+        authUser?.isGoogleAccount == true || dashboardUser?.isGoogleAccount == true;
+
+    if (isGoogleAccount) {
+      await _confirmDeleteGoogleAccount(context);
+      return;
+    }
+
+    await _confirmDeleteWithPassword(context);
+  }
+
+  Future<void> _confirmDeleteGoogleAccount(BuildContext context) async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete account?'),
+        content: const Text(
+          'This permanently deletes your account, exam enrollments, '
+          'study progress, and test history. This cannot be undone.\n\n'
+          'You will sign in with Google again to confirm.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (proceed != true || !context.mounted) return;
+
+    String? idToken;
+    if (kIsWeb) {
+      idToken = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => const _GoogleDeleteConfirmDialog(),
+      );
+    } else {
+      try {
+        idToken = await GetIt.I<GoogleAuthService>().signInAndGetIdToken();
+      } catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Google Sign-In failed: $e')),
+        );
+        return;
+      }
+    }
+
+    if (idToken == null || idToken.isEmpty || !context.mounted) return;
+    await _runDeleteAccount(context, idToken: idToken);
+  }
+
+  Future<void> _confirmDeleteWithPassword(BuildContext context) async {
     final passwordController = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
@@ -248,6 +319,14 @@ class ProfileScreen extends StatelessWidget {
       return;
     }
 
+    await _runDeleteAccount(context, password: password);
+  }
+
+  Future<void> _runDeleteAccount(
+    BuildContext context, {
+    String? password,
+    String? idToken,
+  }) async {
     showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -266,7 +345,10 @@ class ProfileScreen extends StatelessWidget {
     final resultFuture = authBloc.stream.firstWhere(
       (state) => state is AuthUnauthenticated || state is AuthError,
     );
-    authBloc.add(AuthDeleteAccountRequested(password: password));
+    authBloc.add(AuthDeleteAccountRequested(
+      password: password,
+      idToken: idToken,
+    ));
     await resultFuture;
 
     if (!context.mounted) return;
@@ -283,6 +365,67 @@ class ProfileScreen extends StatelessWidget {
     context.go('/login');
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Your account has been deleted')),
+    );
+  }
+}
+
+/// Web: GIS button to re-authenticate before account deletion.
+class _GoogleDeleteConfirmDialog extends StatefulWidget {
+  const _GoogleDeleteConfirmDialog();
+
+  @override
+  State<_GoogleDeleteConfirmDialog> createState() =>
+      _GoogleDeleteConfirmDialogState();
+}
+
+class _GoogleDeleteConfirmDialogState extends State<_GoogleDeleteConfirmDialog> {
+  StreamSubscription<String>? _tokenSub;
+
+  @override
+  void initState() {
+    super.initState();
+    if (GoogleAuthConfig.isConfigured) {
+      _tokenSub = GetIt.I<GoogleAuthService>().webIdTokens.listen((idToken) {
+        if (mounted) Navigator.pop(context, idToken);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _tokenSub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Confirm with Google'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Sign in with the Google account linked to this profile to '
+            'confirm deletion.',
+          ),
+          const SizedBox(height: 20),
+          if (GoogleAuthConfig.isConfigured)
+            GoogleSignInButton(
+              isLoading: false,
+              isSignUp: false,
+              onPressed: () {},
+            )
+          else
+            const Text('Google Sign-In is not configured.'),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ],
     );
   }
 }

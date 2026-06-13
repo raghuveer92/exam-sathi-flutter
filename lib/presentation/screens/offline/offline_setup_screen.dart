@@ -52,6 +52,13 @@ class _OfflineSetupScreenState extends State<OfflineSetupScreen> {
           },
           userExamId: widget.userExamId,
         );
+        // First-time onboarding uses enrollment download instead of a full sync.
+        // Mark setup complete so the router allows navigation to the dashboard.
+        final store = GetIt.I<LocalStore>();
+        if (!store.isInitialDownloadComplete()) {
+          await GetIt.I<DashboardRepository>().reconcileDashboardCache();
+          await store.markInitialDownloadComplete();
+        }
       } else {
         await sync.downloadAllContent(
           onProgress: (p) {

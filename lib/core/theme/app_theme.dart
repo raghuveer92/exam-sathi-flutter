@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../constants/app_colors.dart';
@@ -36,13 +37,14 @@ class AppTheme {
           error: AppColors.error,
         ),
         scaffoldBackgroundColor: AppColors.background,
-        appBarTheme: const AppBarTheme(
+        appBarTheme: AppBarTheme(
           backgroundColor: AppColors.background,
           elevation: 0,
           scrolledUnderElevation: 0,
           centerTitle: false,
           foregroundColor: AppColors.textPrimary,
-          systemOverlayStyle: lightScreenOverlay,
+          // SystemUiOverlayStyle throws UnimplementedError on web release.
+          systemOverlayStyle: kIsWeb ? null : lightScreenOverlay,
         ),
         cardTheme: CardTheme(
           color: AppColors.cardBg,

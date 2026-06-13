@@ -11,9 +11,20 @@ class GoogleAuthService {
   Future<void>? _initFuture;
   StreamSubscription<GoogleSignInAuthenticationEvent>? _webAuthSub;
 
+  final StreamController<String> _webIdTokenController =
+      StreamController<String>.broadcast();
+  final StreamController<Object> _webErrorController =
+      StreamController<Object>.broadcast();
+
   bool get isAvailable => GoogleAuthConfig.isConfigured;
 
-  /// Call once before renderButton or authenticationEvents (web + mobile).
+  /// Fires when GIS returns a credential on web (after user approves sign-in).
+  Stream<String> get webIdTokens => _webIdTokenController.stream;
+
+  /// Fires when GIS reports an error on web.
+  Stream<Object> get webSignInErrors => _webErrorController.stream;
+
+  /// Call once at app startup (web) and before renderButton or sign-in.
   Future<void> initialize() => _ensureInitialized();
 
   Future<void> _ensureInitialized() {
@@ -28,7 +39,36 @@ class GoogleAuthService {
       // serverClientId is Android/iOS only — web asserts if this is set.
       serverClientId: kIsWeb ? null : GoogleAuthConfig.webClientId,
     );
+
+    if (kIsWeb) {
+      _attachWebCredentialListener();
+    }
+
     _initialized = true;
+  }
+
+  /// Subscribe immediately after [GoogleSignIn.initialize] so GIS credentials
+  /// are not dropped by the broadcast [authenticationEvents] stream.
+  void _attachWebCredentialListener() {
+    unawaited(_webAuthSub?.cancel());
+    _webAuthSub = GoogleSignIn.instance.authenticationEvents.listen(
+      (event) {
+        if (event is GoogleSignInAuthenticationEventSignIn) {
+          final idToken = event.user.authentication.idToken;
+          if (idToken != null && idToken.isNotEmpty) {
+            if (kDebugMode) {
+              debugPrint('[GoogleAuthService] Received web idToken');
+            }
+            _webIdTokenController.add(idToken);
+          } else {
+            _webErrorController.add(
+              StateError('Google Sign-In did not return an idToken'),
+            );
+          }
+        }
+      },
+      onError: _webErrorController.add,
+    );
   }
 
   /// Mobile/desktop: opens Google sign-in UI and returns an idToken.
@@ -36,7 +76,7 @@ class GoogleAuthService {
     await _ensureInitialized();
     if (kIsWeb) {
       throw UnsupportedError(
-        'On web, use the GIS renderButton and listen to authenticationEvents.',
+        'On web, use the GIS renderButton and listen to webIdTokens.',
       );
     }
 
@@ -56,39 +96,6 @@ class GoogleAuthService {
       }
       rethrow;
     }
-  }
-
-  /// Web: listen while a login/register screen is visible.
-  Future<StreamSubscription<GoogleSignInAuthenticationEvent>>
-      listenForWebSignIn({
-    required void Function(String idToken) onSignedIn,
-    void Function(Object error)? onError,
-  }) async {
-    assert(kIsWeb, 'listenForWebSignIn is web-only');
-    await _ensureInitialized();
-
-    await _webAuthSub?.cancel();
-    _webAuthSub = GoogleSignIn.instance.authenticationEvents.listen(
-      (event) {
-        if (event is GoogleSignInAuthenticationEventSignIn) {
-          final idToken = event.user.authentication.idToken;
-          if (idToken != null && idToken.isNotEmpty) {
-            onSignedIn(idToken);
-          } else {
-            onError?.call(
-              StateError('Google Sign-In did not return an idToken'),
-            );
-          }
-        }
-      },
-      onError: onError,
-    );
-    return _webAuthSub!;
-  }
-
-  void cancelWebSignInListener() {
-    unawaited(_webAuthSub?.cancel());
-    _webAuthSub = null;
   }
 
   Future<void> signOut() async {

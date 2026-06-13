@@ -8,7 +8,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/auth/google_auth_config.dart';
 import '../../../core/auth/google_auth_service.dart';
-import '../../../core/firebase/analytics_service.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
@@ -33,41 +32,38 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   bool _obscurePassword = true;
-  StreamSubscription? _googleWebSub;
+  StreamSubscription? _googleWebTokenSub;
+  StreamSubscription? _googleWebErrorSub;
 
   @override
   void initState() {
     super.initState();
     if (kIsWeb && GoogleAuthConfig.isConfigured) {
-      unawaited(_setupWebGoogleSignIn());
+      _setupWebGoogleSignIn();
     }
   }
 
-  Future<void> _setupWebGoogleSignIn() async {
+  void _setupWebGoogleSignIn() {
     final googleAuth = GetIt.I<GoogleAuthService>();
-    _googleWebSub = await googleAuth.listenForWebSignIn(
-        onSignedIn: (idToken) {
-          if (!mounted) return;
-          context.read<AuthBloc>().add(AuthGoogleSignInWithIdToken(idToken));
-        },
-        onError: (e) {
-          if (!mounted) return;
-          final message = e is StateError
-              ? e.message
-              : 'Google Sign-In failed. Please try again.';
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(message), backgroundColor: AppColors.error),
-          );
-        },
+    _googleWebTokenSub = googleAuth.webIdTokens.listen((idToken) {
+      if (!mounted) return;
+      context.read<AuthBloc>().add(AuthGoogleSignInWithIdToken(idToken));
+    });
+    _googleWebErrorSub = googleAuth.webSignInErrors.listen((e) {
+      if (!mounted) return;
+      final message = e is StateError
+          ? e.message
+          : 'Google Sign-In failed. Please try again.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: AppColors.error),
       );
+    });
   }
 
   @override
   void dispose() {
-    _googleWebSub?.cancel();
-    if (kIsWeb) {
-      GetIt.I<GoogleAuthService>().cancelWebSignInListener();
-    }
+    _googleWebTokenSub?.cancel();
+    _googleWebErrorSub?.cancel();
     _nameCtrl.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
@@ -96,8 +92,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
       appBar: AppBar(leading: const BackButton()),
       body: BlocConsumer<AuthBloc, AuthState>(
         listener: (context, state) {
-          if (state is AuthAuthenticated) {
-            AnalyticsService.logLogin();
+          if (state is AuthRegistrationPending) {
+            context.go(
+              '/verify-email-otp?email=${Uri.encodeComponent(state.email)}&name=${Uri.encodeComponent(state.fullName)}',
+            );
           }
           if (state is AuthError) {
             ScaffoldMessenger.of(context).showSnackBar(

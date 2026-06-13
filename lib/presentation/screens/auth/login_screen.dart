@@ -33,7 +33,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   bool _obscurePassword = true;
-  StreamSubscription? _googleWebSub;
+  StreamSubscription? _googleWebTokenSub;
+  StreamSubscription? _googleWebErrorSub;
 
   static bool get _isLocalBackend {
     const url = ApiEndpoints.baseUrl;
@@ -48,35 +49,31 @@ class _LoginScreenState extends State<LoginScreen> {
       _passwordCtrl.text = 'Abc@123';
     }
     if (kIsWeb && GoogleAuthConfig.isConfigured) {
-      unawaited(_setupWebGoogleSignIn());
+      _setupWebGoogleSignIn();
     }
   }
 
-  Future<void> _setupWebGoogleSignIn() async {
+  void _setupWebGoogleSignIn() {
     final googleAuth = GetIt.I<GoogleAuthService>();
-    _googleWebSub = await googleAuth.listenForWebSignIn(
-        onSignedIn: (idToken) {
-          if (!mounted) return;
-          context.read<AuthBloc>().add(AuthGoogleSignInWithIdToken(idToken));
-        },
-        onError: (e) {
-          if (!mounted) return;
-          final message = e is StateError
-              ? e.message
-              : 'Google Sign-In failed. Please try again.';
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(message), backgroundColor: AppColors.error),
-          );
-        },
+    _googleWebTokenSub = googleAuth.webIdTokens.listen((idToken) {
+      if (!mounted) return;
+      context.read<AuthBloc>().add(AuthGoogleSignInWithIdToken(idToken));
+    });
+    _googleWebErrorSub = googleAuth.webSignInErrors.listen((e) {
+      if (!mounted) return;
+      final message = e is StateError
+          ? e.message
+          : 'Google Sign-In failed. Please try again.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: AppColors.error),
       );
+    });
   }
 
   @override
   void dispose() {
-    _googleWebSub?.cancel();
-    if (kIsWeb) {
-      GetIt.I<GoogleAuthService>().cancelWebSignInListener();
-    }
+    _googleWebTokenSub?.cancel();
+    _googleWebErrorSub?.cancel();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
@@ -192,7 +189,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
-                      onPressed: () {},
+                      onPressed: () => context.go('/forgot-password'),
                       child: const Text(AppStrings.forgotPassword),
                     ),
                   ),

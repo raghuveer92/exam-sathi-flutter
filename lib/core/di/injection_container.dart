@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:get_it/get_it.dart';
 import 'package:logger/logger.dart';
 
+import '../auth/google_auth_config.dart';
 import '../auth/google_auth_service.dart';
 import '../local/local_store.dart';
 import '../network/api_client.dart';
@@ -54,6 +56,11 @@ Future<void> setupDependencies() async {
   });
 
   sl.registerLazySingleton<GoogleAuthService>(() => GoogleAuthService());
+
+  // Initialize GIS once at startup so credential events are not missed on web.
+  if (kIsWeb && GoogleAuthConfig.isConfigured) {
+    await sl<GoogleAuthService>().initialize();
+  }
 
   sl.registerLazySingleton<AuthRepository>(() => AuthRepository(
         client: sl<ApiClient>(),

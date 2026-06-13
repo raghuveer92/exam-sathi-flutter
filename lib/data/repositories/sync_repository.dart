@@ -7,11 +7,21 @@ class SyncRepository {
 
   SyncRepository({required ApiClient client}) : _client = client;
 
-  Future<Map<String, dynamic>> syncCatalog({DateTime? since}) async {
+  Future<Map<String, dynamic>> syncCatalog({
+    DateTime? since,
+    List<int>? examIds,
+  }) async {
     ApiCallTracker.instance.record('GET ${ApiEndpoints.syncCatalog}');
+    final params = <String, dynamic>{};
+    if (since != null) {
+      params['since'] = since.toIso8601String();
+    }
+    if (examIds != null && examIds.isNotEmpty) {
+      params['examIds'] = examIds;
+    }
     final response = await _client.dio.get(
       ApiEndpoints.syncCatalog,
-      queryParameters: since != null ? {'since': since.toIso8601String()} : null,
+      queryParameters: params.isEmpty ? null : params,
     );
     return response.data['data'] as Map<String, dynamic>;
   }

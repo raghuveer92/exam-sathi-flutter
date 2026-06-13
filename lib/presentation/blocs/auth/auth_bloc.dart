@@ -18,6 +18,11 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<AuthCheckRequested>(_onCheckRequested);
     on<AuthLoginRequested>(_onLoginRequested);
     on<AuthRegisterRequested>(_onRegisterRequested);
+    on<AuthVerifyEmailOtpRequested>(_onVerifyEmailOtpRequested);
+    on<AuthResendEmailOtpRequested>(_onResendEmailOtpRequested);
+    on<AuthForgotPasswordRequested>(_onForgotPasswordRequested);
+    on<AuthVerifyForgotPasswordOtpRequested>(_onVerifyForgotPasswordOtpRequested);
+    on<AuthResetPasswordRequested>(_onResetPasswordRequested);
     on<AuthLogoutRequested>(_onLogoutRequested);
     on<AuthGoogleSignInRequested>(_onGoogleSignInRequested);
     on<AuthGoogleSignInWithIdToken>(_onGoogleSignInWithIdToken);
@@ -37,15 +42,23 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       return;
     }
 
-    // Offline-first: restore cached profile immediately — no network required.
     final cached = await _authRepository.restoreSession();
     if (cached != null) {
+      if (cached.needsEmailVerification) {
+        await _authRepository.logout();
+        emit(AuthUnauthenticated());
+        return;
+      }
       emit(AuthAuthenticated(user: cached, isOfflineSession: true));
     }
 
-    // Background refresh when online (best-effort).
     try {
       final user = await _authRepository.getMe();
+      if (user.needsEmailVerification) {
+        await _authRepository.logout();
+        emit(AuthUnauthenticated());
+        return;
+      }
       emit(AuthAuthenticated(user: user, isOfflineSession: false));
     } catch (e) {
       if (cached != null) return;
@@ -92,8 +105,84 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         password: event.password,
         phone: event.phone,
       );
+      emit(AuthRegistrationPending(
+        email: data['email'] as String? ?? event.email,
+        fullName: data['fullName'] as String? ?? event.fullName,
+        password: event.password,
+      ));
+    } catch (e) {
+      emit(AuthError(message: _parseError(e)));
+    }
+  }
+
+  Future<void> _onVerifyEmailOtpRequested(
+    AuthVerifyEmailOtpRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      await _authRepository.verifyEmailOtp(event.email, event.otp);
+      final data = await _authRepository.login(event.email, event.password);
       final user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
       emit(AuthAuthenticated(user: user));
+    } catch (e) {
+      emit(AuthError(message: _parseError(e)));
+    }
+  }
+
+  Future<void> _onResendEmailOtpRequested(
+    AuthResendEmailOtpRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    final previous = state;
+    try {
+      await _authRepository.resendEmailOtp(event.email);
+      if (previous is AuthRegistrationPending) {
+        emit(previous);
+      }
+    } catch (e) {
+      emit(AuthError(message: _parseError(e)));
+    }
+  }
+
+  Future<void> _onForgotPasswordRequested(
+    AuthForgotPasswordRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      await _authRepository.forgotPassword(event.email);
+      emit(AuthForgotPasswordPending(email: event.email));
+    } catch (e) {
+      emit(AuthError(message: _parseError(e)));
+    }
+  }
+
+  Future<void> _onVerifyForgotPasswordOtpRequested(
+    AuthVerifyForgotPasswordOtpRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      await _authRepository.verifyForgotPasswordOtp(event.email, event.otp);
+      emit(AuthForgotPasswordOtpVerified(email: event.email, otp: event.otp));
+    } catch (e) {
+      emit(AuthError(message: _parseError(e)));
+    }
+  }
+
+  Future<void> _onResetPasswordRequested(
+    AuthResetPasswordRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      await _authRepository.resetPassword(
+        email: event.email,
+        otp: event.otp,
+        newPassword: event.newPassword,
+      );
+      emit(AuthUnauthenticated());
     } catch (e) {
       emit(AuthError(message: _parseError(e)));
     }
@@ -146,7 +235,10 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   ) async {
     emit(AuthLoading());
     try {
-      await _authRepository.deleteAccount(event.password);
+      await _authRepository.deleteAccount(
+        password: event.password,
+        idToken: event.idToken,
+      );
       emit(AuthUnauthenticated());
     } catch (e) {
       emit(AuthError(message: _parseError(e)));

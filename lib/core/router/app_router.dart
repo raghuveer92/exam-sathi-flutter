@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -7,6 +8,10 @@ import '../../core/firebase/analytics_service.dart';
 import '../../presentation/blocs/auth/auth_bloc.dart';
 import '../../presentation/screens/auth/login_screen.dart';
 import '../../presentation/screens/auth/register_screen.dart';
+import '../../presentation/screens/auth/verify_email_otp_screen.dart';
+import '../../presentation/screens/auth/forgot_password_screen.dart';
+import '../../presentation/screens/auth/forgot_password_otp_screen.dart';
+import '../../presentation/screens/auth/reset_password_screen.dart';
 import '../../presentation/screens/dashboard/dashboard_screen.dart';
 import '../../presentation/screens/subjects/subjects_screen.dart';
 import '../../presentation/screens/subjects/exam_subjects_screen.dart';
@@ -56,7 +61,7 @@ class AppRouter {
   ) =>
       GoRouter(
     navigatorKey: rootNavigatorKey,
-    observers: [AnalyticsService.observer],
+    observers: kIsWeb ? const [] : [AnalyticsService.observer],
     initialLocation: '/splash',
     refreshListenable: _AuthRefreshNotifier(authBloc.stream),
     redirect: (context, state) {
@@ -65,7 +70,10 @@ class AppRouter {
       final isSplash = loc == '/splash';
       final isLogin = loc == '/login';
       final isRegister = loc == '/register';
-      final isAuthForm = isLogin || isRegister;
+      final isVerifyEmailOtp = loc == '/verify-email-otp';
+      final isForgotPassword = loc.startsWith('/forgot-password');
+      final isResetPassword = loc == '/reset-password';
+      final isAuthForm = isLogin || isRegister || isVerifyEmailOtp || isForgotPassword || isResetPassword;
       final isSelectExam = loc == '/select-exam';
       final isMyExams = loc == '/my-exams';
       final isOnboardingMyExams =
@@ -80,8 +88,34 @@ class AppRouter {
 
       if (authState is AuthError && isSplash) return isRegister ? '/register' : '/login';
 
+      if (authState is AuthRegistrationPending) {
+        if (!isVerifyEmailOtp) {
+          return '/verify-email-otp?email=${Uri.encodeComponent(authState.email)}&name=${Uri.encodeComponent(authState.fullName)}';
+        }
+        return null;
+      }
+
+      if (authState is AuthForgotPasswordPending) {
+        if (!isForgotPassword) {
+          return '/forgot-password-otp?email=${Uri.encodeComponent(authState.email)}';
+        }
+        return null;
+      }
+
+      if (authState is AuthForgotPasswordOtpVerified) {
+        if (!isResetPassword) {
+          return '/reset-password?email=${Uri.encodeComponent(authState.email)}&otp=${Uri.encodeComponent(authState.otp)}';
+        }
+        return null;
+      }
+
       if (authState is AuthAuthenticated) {
         final user = authState.user;
+
+        if (user.needsEmailVerification) {
+          return '/login';
+        }
+
         final downloadDone =
             GetIt.I<LocalStore>().isInitialDownloadComplete();
 
@@ -123,7 +157,11 @@ class AppRouter {
 
       if (authState is AuthUnauthenticated) {
         if (isSplash ||
-            (!loc.startsWith('/login') && !loc.startsWith('/register'))) {
+            (!loc.startsWith('/login') &&
+                !loc.startsWith('/register') &&
+                !loc.startsWith('/verify-email-otp') &&
+                !loc.startsWith('/forgot-password') &&
+                !loc.startsWith('/reset-password'))) {
           return '/login';
         }
       }
@@ -133,6 +171,34 @@ class AppRouter {
       GoRoute(path: '/splash', builder: (_, __) => const SplashScreen()),
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
+      GoRoute(
+        path: '/verify-email-otp',
+        builder: (context, state) {
+          final authState = context.read<AuthBloc>().state;
+          final password = authState is AuthRegistrationPending
+              ? authState.password
+              : '';
+          return VerifyEmailOtpScreen(
+            email: state.uri.queryParameters['email'] ?? '',
+            fullName: state.uri.queryParameters['name'] ?? 'there',
+            password: password,
+          );
+        },
+      ),
+      GoRoute(path: '/forgot-password', builder: (_, __) => const ForgotPasswordScreen()),
+      GoRoute(
+        path: '/forgot-password-otp',
+        builder: (_, state) => ForgotPasswordOtpScreen(
+          email: state.uri.queryParameters['email'] ?? '',
+        ),
+      ),
+      GoRoute(
+        path: '/reset-password',
+        builder: (_, state) => ResetPasswordScreen(
+          email: state.uri.queryParameters['email'] ?? '',
+          otp: state.uri.queryParameters['otp'] ?? '',
+        ),
+      ),
       GoRoute(
         path: '/offline-setup',
         builder: (_, state) {

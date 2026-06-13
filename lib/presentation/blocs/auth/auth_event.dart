@@ -31,11 +31,61 @@ class AuthRegisterRequested extends AuthEvent {
   List<Object?> get props => [email, fullName];
 }
 
+class AuthVerifyEmailOtpRequested extends AuthEvent {
+  final String email;
+  final String otp;
+  final String password;
+  const AuthVerifyEmailOtpRequested({
+    required this.email,
+    required this.otp,
+    required this.password,
+  });
+  @override
+  List<Object?> get props => [email, otp];
+}
+
+class AuthResendEmailOtpRequested extends AuthEvent {
+  final String email;
+  const AuthResendEmailOtpRequested({required this.email});
+  @override
+  List<Object?> get props => [email];
+}
+
+class AuthForgotPasswordRequested extends AuthEvent {
+  final String email;
+  const AuthForgotPasswordRequested({required this.email});
+  @override
+  List<Object?> get props => [email];
+}
+
+class AuthVerifyForgotPasswordOtpRequested extends AuthEvent {
+  final String email;
+  final String otp;
+  const AuthVerifyForgotPasswordOtpRequested({
+    required this.email,
+    required this.otp,
+  });
+  @override
+  List<Object?> get props => [email, otp];
+}
+
+class AuthResetPasswordRequested extends AuthEvent {
+  final String email;
+  final String otp;
+  final String newPassword;
+  const AuthResetPasswordRequested({
+    required this.email,
+    required this.otp,
+    required this.newPassword,
+  });
+  @override
+  List<Object?> get props => [email, otp];
+}
+
 class AuthLogoutRequested extends AuthEvent {}
 
 class AuthGoogleSignInRequested extends AuthEvent {}
 
-/// Web GIS button completed — exchange idToken with backend.
 class AuthGoogleSignInWithIdToken extends AuthEvent {
   final String idToken;
   const AuthGoogleSignInWithIdToken(this.idToken);
@@ -44,14 +94,13 @@ class AuthGoogleSignInWithIdToken extends AuthEvent {
 }
 
 class AuthDeleteAccountRequested extends AuthEvent {
-  final String password;
-  const AuthDeleteAccountRequested({required this.password});
+  final String? password;
+  final String? idToken;
+  const AuthDeleteAccountRequested({this.password, this.idToken});
   @override
-  List<Object?> get props => [];
+  List<Object?> get props => [password, idToken];
 }
 
-/// Locally updates the authenticated user without a network round-trip.
-/// Use after mutations (selectExam, setExamGoal) to keep router state in sync.
 class AuthUserUpdated extends AuthEvent {
   final UserModel user;
   const AuthUserUpdated({required this.user});

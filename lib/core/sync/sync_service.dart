@@ -738,9 +738,16 @@ class SyncService {
     return ingestedProgress;
   }
 
-  Future<CatalogSyncResult> syncCatalog({bool incremental = false}) async {
+  Future<CatalogSyncResult> syncCatalog({
+    bool incremental = false,
+    List<int>? examIds,
+  }) async {
     final since = incremental ? lastSyncTime : null;
-    final data = await _syncRepository.syncCatalog(since: since);
+    final scopedExamIds = examIds ?? await _resolveEnrolledExamIds();
+    final data = await _syncRepository.syncCatalog(
+      since: since,
+      examIds: scopedExamIds.isEmpty ? null : scopedExamIds,
+    );
     final serverTime = data['serverTime'] as String?;
 
     if (incremental && since != null) {
@@ -775,6 +782,11 @@ class SyncService {
       affectedSubjectIds: _subjectIdsFromCatalogMaster(),
       serverTime: serverTime,
     );
+  }
+
+  Future<List<int>> _resolveEnrolledExamIds() async {
+    final exams = await _dashboardRepository.resolveMyExamsFromCache();
+    return exams.map((e) => e.examId).toSet().toList();
   }
 
   Future<void> _persistLastSyncTime(String? serverTime) async {

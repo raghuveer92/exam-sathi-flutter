@@ -18,7 +18,9 @@ class UserModel extends Equatable {
   final List<UserExamModel> userExams;
   final int studyStreakDays;
   final bool isActive;
+  final bool isEmailVerified;
   final List<String> roles;
+  final String authProvider;
 
   const UserModel({
     required this.id,
@@ -37,7 +39,9 @@ class UserModel extends Equatable {
     this.userExams = const [],
     this.studyStreakDays = 0,
     this.isActive = true,
+    this.isEmailVerified = false,
     this.roles = const [],
+    this.authProvider = 'EMAIL',
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json) => UserModel(
@@ -60,10 +64,12 @@ class UserModel extends Equatable {
           [],
         studyStreakDays: (json['studyStreakDays'] as num?)?.toInt() ?? 0,
         isActive: (json['isActive'] as bool?) ?? true,
+        isEmailVerified: (json['isEmailVerified'] as bool?) ?? false,
         roles: (json['roles'] as List<dynamic>?)
                 ?.map((e) => e as String)
                 .toList() ??
             [],
+        authProvider: json['authProvider'] as String? ?? 'EMAIL',
       );
 
   Map<String, dynamic> toJson() => {
@@ -81,10 +87,14 @@ class UserModel extends Equatable {
         'userExams': userExams.map((e) => e.toJson()).toList(),
         'studyStreakDays': studyStreakDays,
         'isActive': isActive,
+        'isEmailVerified': isEmailVerified,
         'roles': roles,
+        'authProvider': authProvider,
       };
 
   bool get isAdmin => roles.contains('ROLE_ADMIN');
+  bool get isGoogleAccount => authProvider == 'GOOGLE';
+  bool get needsEmailVerification => !isGoogleAccount && !isEmailVerified;
   bool get hasSelectedExam => selectedExamId != null;
   bool get hasExamGoal => examDate != null;
 
@@ -123,7 +133,9 @@ class UserModel extends Equatable {
         userExams: userExams ?? this.userExams,
         studyStreakDays: studyStreakDays,
         isActive: isActive,
+        isEmailVerified: isEmailVerified,
         roles: roles,
+        authProvider: authProvider,
       );
 
   @override

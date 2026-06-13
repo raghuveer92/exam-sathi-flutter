@@ -3,7 +3,9 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_web_plugins/flutter_web_plugins.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:google_sign_in_web/google_sign_in_web.dart';
 import 'package:flutter_adsense/flutter_adsense.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
@@ -23,6 +25,11 @@ Object? _semanticsHandle;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Release web builds may tree-shake auto plugin registration; register explicitly.
+  if (kIsWeb) {
+    GoogleSignInPlugin.registerWith(webPluginRegistrar);
+  }
 
   // SystemChrome APIs throw UnimplementedError on web (async, uncaught in release).
   if (!kIsWeb) {

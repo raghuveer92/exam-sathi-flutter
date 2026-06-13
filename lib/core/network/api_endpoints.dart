@@ -11,6 +11,11 @@ class ApiEndpoints {
   static const String register = '/auth/register';
   static const String login = '/auth/login';
   static const String googleSignIn = '/auth/google';
+  static const String verifyEmailOtp = '/auth/verify-email-otp';
+  static const String resendEmailOtp = '/auth/resend-email-otp';
+  static const String forgotPassword = '/auth/forgot-password';
+  static const String verifyForgotPasswordOtp = '/auth/verify-forgot-password-otp';
+  static const String resetPassword = '/auth/reset-password';
 
   // Student
   static const String me = '/student/me';

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -13,58 +14,63 @@ class SplashScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: AppTheme.darkScreenOverlay,
-      child: BlocListener<AuthBloc, AuthState>(
-        listener: (context, state) {
-          if (state is AuthError) {
-            context.go('/login');
-          }
-        },
-        child: Scaffold(
-          body: SafeArea(
-            child: Container(
-              decoration:
-                  const BoxDecoration(gradient: AppColors.primaryGradient),
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Image.asset(
-                      'assets/images/logo.png',
-                      width: 160,
-                      height: 160,
-                    ),
-                    const SizedBox(height: 24),
-                    const Text(
-                      'ExamSaathi',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 36,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.0,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Study Smarter, Not Harder',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.85),
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 60),
-                    const CircularProgressIndicator(
+    final content = BlocListener<AuthBloc, AuthState>(
+      listener: (context, state) {
+        if (state is AuthError) {
+          context.go('/login');
+        }
+      },
+      child: Scaffold(
+        body: SafeArea(
+          child: Container(
+            decoration:
+                const BoxDecoration(gradient: AppColors.primaryGradient),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Image.asset(
+                    'assets/images/logo.png',
+                    width: 160,
+                    height: 160,
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'ExamSaathi',
+                    style: TextStyle(
                       color: Colors.white,
-                      strokeWidth: 2,
+                      fontSize: 36,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.0,
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Study Smarter, Not Harder',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.85),
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 60),
+                  const CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2,
+                  ),
+                ],
               ),
             ),
           ),
         ),
       ),
+    );
+
+    // SystemUiOverlayStyle throws UnimplementedError on web (release builds).
+    if (kIsWeb) return content;
+
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: AppTheme.darkScreenOverlay,
+      child: content,
     );
   }
 }

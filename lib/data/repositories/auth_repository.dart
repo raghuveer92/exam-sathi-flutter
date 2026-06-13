@@ -47,11 +47,55 @@ class AuthRepository {
       },
     );
     final body = response.data as Map<String, dynamic>;
-    final data = body['data'] as Map<String, dynamic>;
-    await _client.saveToken(data['accessToken'] as String);
-    final user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
-    await cacheUser(user);
-    return data;
+    return body['data'] as Map<String, dynamic>;
+  }
+
+  Future<String> resendEmailOtp(String email) async {
+    final response = await _client.dio.post(
+      ApiEndpoints.resendEmailOtp,
+      data: {'email': email},
+    );
+    final body = response.data as Map<String, dynamic>;
+    return body['message'] as String? ??
+        'If an account exists and is not yet verified, an OTP has been sent.';
+  }
+
+  Future<void> verifyEmailOtp(String email, String otp) async {
+    await _client.dio.post(
+      ApiEndpoints.verifyEmailOtp,
+      data: {'email': email, 'otp': otp},
+    );
+  }
+
+  Future<String> forgotPassword(String email) async {
+    final response = await _client.dio.post(
+      ApiEndpoints.forgotPassword,
+      data: {'email': email},
+    );
+    final body = response.data as Map<String, dynamic>;
+    return body['message'] as String? ?? 'If an account exists, an OTP has been sent.';
+  }
+
+  Future<void> verifyForgotPasswordOtp(String email, String otp) async {
+    await _client.dio.post(
+      ApiEndpoints.verifyForgotPasswordOtp,
+      data: {'email': email, 'otp': otp},
+    );
+  }
+
+  Future<void> resetPassword({
+    required String email,
+    required String otp,
+    required String newPassword,
+  }) async {
+    await _client.dio.post(
+      ApiEndpoints.resetPassword,
+      data: {
+        'email': email,
+        'otp': otp,
+        'newPassword': newPassword,
+      },
+    );
   }
 
   Future<Map<String, dynamic>> signInWithGoogle() async {
@@ -107,10 +151,13 @@ class AuthRepository {
   }
 
   /// Permanently deletes the account on the server and wipes all local data.
-  Future<void> deleteAccount(String password) async {
+  Future<void> deleteAccount({String? password, String? idToken}) async {
     await _client.dio.delete(
       ApiEndpoints.me,
-      data: {'password': password},
+      data: {
+        if (password != null) 'password': password,
+        if (idToken != null) 'idToken': idToken,
+      },
     );
     await _client.clearToken();
     await _store.clearUserStudyData();
