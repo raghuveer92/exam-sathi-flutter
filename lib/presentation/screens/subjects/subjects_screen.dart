@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/router/app_navigation.dart';
 import '../../../core/firebase/analytics_service.dart';
@@ -235,8 +234,6 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
           context,
           '/subjects/exam/${group.exam.id}/${subject.id}',
         );
-        if (!mounted) return;
-        _loadFromLocal();
       },
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),

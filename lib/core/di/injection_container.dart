@@ -95,6 +95,7 @@ Future<void> setupDependencies() async {
         client: sl<ApiClient>(),
         store: sl<LocalStore>(),
         offlineQueue: sl<OfflineQueueService>(),
+        logger: sl<Logger>(),
       ));
   sl.registerLazySingleton<ProgressRepository>(() => ProgressRepository(
         client: sl<ApiClient>(),

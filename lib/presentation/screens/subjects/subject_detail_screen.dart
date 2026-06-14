@@ -1,26 +1,30 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/router/app_navigation.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/firebase/analytics_service.dart';
 import '../../../core/testing/test_keys.dart';
 import '../../../core/utils/responsive_helper.dart';
-import '../../../data/models/subject_detail_model.dart';
 import '../../../data/models/mock_test_model.dart';
+import '../../../data/models/subject_detail_model.dart';
 import '../../../data/models/topic_model.dart';
 import '../../../data/repositories/mock_test_repository.dart';
 import '../../../data/repositories/progress_repository.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
+import '../../widgets/topics/topic_assessment_ui.dart';
 
 // ─── Topic status helper ────────────────────────────────────────────────────
 enum _TopicStatus { notStarted, inProgress, completed }
 
 _TopicStatus _statusOf(TopicModel t) {
   if (t.isCompleted || t.status == 'COMPLETED') return _TopicStatus.completed;
-  if (t.actualHours > 0 || t.status == 'IN_PROGRESS') return _TopicStatus.inProgress;
+  if (t.actualHours > 0 || t.status == 'IN_PROGRESS') {
+    return _TopicStatus.inProgress;
+  }
   return _TopicStatus.notStarted;
 }
 
@@ -29,6 +33,10 @@ bool _isSelectable(TopicModel t) => _statusOf(t) != _TopicStatus.completed;
 String _fmtH(double h) {
   final s = h.toStringAsFixed(1);
   return s.endsWith('.0') ? '${h.toInt()}h' : '${s}h';
+}
+
+String _studyMetaLine(TopicModel t) {
+  return '${_fmtH(t.estimatedHours)} est • ${_fmtH(t.actualHours)} studied';
 }
 
 String _fmtDuration(double hours) {
@@ -76,6 +84,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
   final Set<int> _selectedTopicIds = {};
   double _selectionStudyHours = 0;
   _TopicFilter _topicFilter = _TopicFilter.all;
+  Map<int, MockTestAttemptModel> _latestTopicResults = {};
 
   List<TopicModel> get _allTopics {
     if (_detail == null) return [];
@@ -156,21 +165,110 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
       return;
     }
     if (_statusOf(topic) == _TopicStatus.completed) {
-      _showCompletedTopicSheet(topic);
+      if (topic.hasAssessment) {
+        _openTopicPerformance(topic);
+      }
       return;
     }
     _enterSelectionMode(topic);
   }
 
   void _onTopicLongPress(TopicModel topic) {
-    if (!_isSelectable(topic)) {
-      if (!_selectionMode) _showCompletedTopicSheet(topic);
-      return;
-    }
+    if (!_isSelectable(topic)) return;
     if (!_selectionMode) {
       _enterSelectionMode(topic);
     } else {
       _toggleTopicSelection(topic);
+    }
+  }
+
+  Future<void> _openTopicAssessment(TopicModel topic) async {
+    await AppNavigation.pushIfDifferent(
+      context,
+      AppNavigation.mockTestTopic(
+        topic.id,
+        title: topic.title,
+        subjectId: widget.subjectId,
+        userExamId: widget.userExamId,
+      ),
+    );
+    if (mounted) await _refreshFromCache();
+  }
+
+  Future<void> _refreshFromCache() async {
+    final detail = GetIt.I<ProgressRepository>().tryReadSubjectDetailOffline(
+      subjectId: widget.subjectId,
+      userExamId: widget.userExamId,
+    );
+    if (detail != null && mounted) {
+      setState(() => _detail = detail);
+      unawaited(_refreshLatestTopicResults(detail));
+    }
+  }
+
+  Future<void> _refreshLatestTopicResults([SubjectDetailModel? detail]) async {
+    final source = detail ?? _detail;
+    if (source == null) return;
+    final topics = source.chapters.expand((chapter) => chapter.topics).toList();
+    final topicIds = topics.map((topic) => topic.id);
+    final results =
+        GetIt.I<MockTestRepository>().getLatestTopicResultsCached(topicIds);
+    if (!mounted) {
+      _latestTopicResults = results;
+      return;
+    }
+    setState(() => _latestTopicResults = results);
+
+    final missingAssessedTopics = topics
+        .where((topic) =>
+            topic.hasAssessment && !_latestTopicResults.containsKey(topic.id))
+        .toList();
+    if (missingAssessedTopics.isEmpty) return;
+
+    final repo = GetIt.I<MockTestRepository>();
+    final fetched = <int, MockTestAttemptModel>{};
+    for (final topic in missingAssessedTopics) {
+      try {
+        final result =
+            await repo.getLatestTopicResult(topic.id, forceRemote: true);
+        if (result != null) fetched[topic.id] = result;
+      } catch (_) {}
+    }
+    if (fetched.isNotEmpty && mounted) {
+      setState(() {
+        _latestTopicResults = {
+          ..._latestTopicResults,
+          ...fetched,
+        };
+      });
+    }
+  }
+
+  Future<void> _openTopicPerformance(TopicModel topic) async {
+    final cached = _latestTopicResults[topic.id];
+    if (cached != null) {
+      await AppNavigation.pushIfDifferent(
+        context,
+        '/mock-test/${topic.id}/result/${cached.id}',
+        extra: cached,
+      );
+      return;
+    }
+    try {
+      final attempts =
+          await GetIt.I<MockTestRepository>().getAttempts(topic.id);
+      if (!mounted) return;
+      final completed = attempts.where((a) => a.isCompleted).toList();
+      if (completed.isEmpty) return;
+      await AppNavigation.pushIfDifferent(
+        context,
+        '/mock-test/${topic.id}/result/${completed.first.id}',
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not load test results')),
+      );
     }
   }
 
@@ -200,7 +298,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
         totalStudyHours: loggedHours,
         studyDate: _localTodayDate(),
       );
-      await _load(silent: true);
+      await _refreshFromCache();
       _exitSelectionMode();
       if (!mounted) return;
 
@@ -221,19 +319,6 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     }
   }
 
-  void _showCompletedTopicSheet(TopicModel topic) {
-    showModalBottomSheet<void>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => _CompletedTopicSheet(
-        topic: topic,
-        subjectColor: _detail!.color,
-      ),
-    );
-  }
-
   @override
   void initState() {
     super.initState();
@@ -244,17 +329,19 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     if (offline != null) {
       _detail = offline;
       _loading = false;
+      unawaited(_refreshLatestTopicResults(offline));
+      return;
     }
-    _load(silent: offline != null);
+    _load();
   }
 
-  Future<void> _load({bool silent = false}) async {
+  Future<void> _load({bool silent = false, bool forceRemote = false}) async {
     if (!silent && _detail == null) setState(() => _loading = true);
     try {
       final detail = await GetIt.I<ProgressRepository>().getSubjectDetail(
         widget.subjectId,
         userExamId: widget.userExamId,
-        forceRemote: false,
+        forceRemote: forceRemote,
       );
       if (!mounted) return;
       setState(() {
@@ -262,6 +349,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
         _loading = false;
         _error = null;
       });
+      unawaited(_refreshLatestTopicResults(detail));
       AnalyticsService.logSubjectOpened(
         subjectId: detail.subjectId,
         subjectName: detail.subjectName,
@@ -329,158 +417,162 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
         }
       },
       child: Scaffold(
-      key: TestKeys.subjectDetailScreen,
-      backgroundColor: const Color(0xFFF5F6FA),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        foregroundColor: AppColors.textPrimary,
-        elevation: 0,
-        surfaceTintColor: Colors.white,
-        title: Text(
-          _selectionMode
-              ? '${_selectedTopicIds.length} selected'
-              : d.subjectName,
-          style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 18,
-            color: AppColors.textPrimary,
-          ),
-        ),
-        centerTitle: true,
-        leading: IconButton(
-          icon: Icon(
+        key: TestKeys.subjectDetailScreen,
+        backgroundColor: const Color(0xFFF5F6FA),
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          foregroundColor: AppColors.textPrimary,
+          elevation: 0,
+          surfaceTintColor: Colors.white,
+          title: Text(
             _selectionMode
-                ? Icons.close_rounded
-                : Icons.arrow_back_ios_new_rounded,
-            size: 20,
-          ),
-          onPressed: () {
-            if (_selectionMode) {
-              _exitSelectionMode();
-            } else {
-              AppNavigation.popOrGoIfDifferent(
-                context,
-                '/subjects/exam/${widget.userExamId}',
-              );
-            }
-          },
-        ),
-        actions: [
-          if (!_selectionMode)
-            IconButton(
-              icon: const Icon(Icons.checklist_rounded),
-              tooltip: 'Select topics',
-              onPressed: () => _enterSelectionMode(),
+                ? '${_selectedTopicIds.length} selected'
+                : d.subjectName,
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 18,
+              color: AppColors.textPrimary,
             ),
-        ],
-      ),
-      bottomNavigationBar: _selectedTopicIds.isNotEmpty
-          ? _TopicSelectionPanel(
-              studyHours: _selectionStudyHours,
-              isSaving: _bulkSaving,
-              subjectColor: color,
-              onDecrement: () {
-                if (_selectionStudyHours <= 0) return;
-                setState(() =>
-                    _selectionStudyHours = (_selectionStudyHours - 1.0)
-                        .clamp(0.0, 999.0));
-              },
-              onIncrement: () => setState(
-                () => _selectionStudyHours = (_selectionStudyHours + 1.0)
-                    .clamp(0.0, 999.0),
-              ),
-              onMarkCompleted: _bulkMarkCompleted,
-            )
-          : null,
-      body: Center(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: isDesktop ? 860 : double.infinity,
           ),
-          child: CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: _ProgressSection(
-                    detail: d,
-                    color: color,
-                    pct: pct,
-                    completedTopics: completedTopics,
-                    totalTopics: totalTopics,
-                    completionPercent: _liveCompletionPercent,
-                    localTotalHours: _localTotalHours,
+          centerTitle: true,
+          leading: IconButton(
+            icon: Icon(
+              _selectionMode
+                  ? Icons.close_rounded
+                  : Icons.arrow_back_ios_new_rounded,
+              size: 20,
+            ),
+            onPressed: () {
+              if (_selectionMode) {
+                _exitSelectionMode();
+              } else {
+                AppNavigation.popOrGoIfDifferent(
+                  context,
+                  '/subjects/exam/${widget.userExamId}',
+                );
+              }
+            },
+          ),
+          actions: [
+            if (!_selectionMode)
+              IconButton(
+                icon: const Icon(Icons.checklist_rounded),
+                tooltip: 'Select topics',
+                onPressed: () => _enterSelectionMode(),
+              ),
+          ],
+        ),
+        bottomNavigationBar: _selectedTopicIds.isNotEmpty
+            ? _TopicSelectionPanel(
+                studyHours: _selectionStudyHours,
+                isSaving: _bulkSaving,
+                subjectColor: color,
+                onDecrement: () {
+                  if (_selectionStudyHours <= 0) return;
+                  setState(() => _selectionStudyHours =
+                      (_selectionStudyHours - 1.0).clamp(0.0, 999.0));
+                },
+                onIncrement: () => setState(
+                  () => _selectionStudyHours =
+                      (_selectionStudyHours + 1.0).clamp(0.0, 999.0),
+                ),
+                onMarkCompleted: _bulkMarkCompleted,
+              )
+            : null,
+        body: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: isDesktop ? 860 : double.infinity,
+            ),
+            child: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: _ProgressSection(
+                      detail: d,
+                      color: color,
+                      pct: pct,
+                      completedTopics: completedTopics,
+                      totalTopics: totalTopics,
+                      completionPercent: _liveCompletionPercent,
+                      localTotalHours: _localTotalHours,
+                    ),
                   ),
                 ),
-              ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  child: Row(
-                    children: [
-                      Text(
-                        'Topics ($totalTopics)',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      const Spacer(),
-                      OutlinedButton.icon(
-                        onPressed: _showTopicFilter,
-                        icon: const Icon(Icons.filter_list_rounded, size: 18),
-                        label: Text(_topicFilterLabel),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.textSecondary,
-                          side: const BorderSide(color: Color(0xFFE5E7EB)),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Row(
+                      children: [
+                        Text(
+                          'Topics ($totalTopics)',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary,
                           ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
+                        ),
+                        const Spacer(),
+                        OutlinedButton.icon(
+                          onPressed: _showTopicFilter,
+                          icon: const Icon(Icons.filter_list_rounded, size: 18),
+                          label: Text(_topicFilterLabel),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.textSecondary,
+                            side: const BorderSide(color: Color(0xFFE5E7EB)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              SliverPadding(
-                padding: EdgeInsets.fromLTRB(
-                  16,
-                  0,
-                  16,
-                  _selectedTopicIds.isNotEmpty ? 200 : 80,
-                ),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (ctx, i) {
-                      final topic = _filteredTopics[i];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: _TopicTile(
-                          key: TestKeys.topicTile(topic.id),
-                          topic: topic,
-                          subjectColor: color,
-                          selectionMode: _selectionMode,
-                          isSelectable: _isSelectable(topic),
-                          isSelected: _selectedTopicIds.contains(topic.id),
-                          onTap: () => _onTopicTap(topic),
-                          onLongPress: () => _onTopicLongPress(topic),
-                        ),
-                      );
-                    },
-                    childCount: _filteredTopics.length,
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    0,
+                    16,
+                    _selectedTopicIds.isNotEmpty ? 200 : 80,
+                  ),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (ctx, i) {
+                        final topic = _filteredTopics[i];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: _TopicTile(
+                            key: TestKeys.topicTile(topic.id),
+                            topic: topic,
+                            latestResult: _latestTopicResults[topic.id],
+                            subjectColor: color,
+                            selectionMode: _selectionMode,
+                            isSelectable: _isSelectable(topic),
+                            isSelected: _selectedTopicIds.contains(topic.id),
+                            onTap: () => _onTopicTap(topic),
+                            onLongPress: () => _onTopicLongPress(topic),
+                            onStartTest: () => _openTopicAssessment(topic),
+                            onViewPerformance: () =>
+                                _openTopicPerformance(topic),
+                            onRetake: () => _openTopicAssessment(topic),
+                          ),
+                        );
+                      },
+                      childCount: _filteredTopics.length,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
-    ),
     );
   }
 
@@ -512,7 +604,8 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
               ListTile(
                 title: Text(_filterName(filter)),
                 trailing: _topicFilter == filter
-                    ? Icon(Icons.check_rounded, color: _detail?.color ?? AppColors.primary)
+                    ? Icon(Icons.check_rounded,
+                        color: _detail?.color ?? AppColors.primary)
                     : null,
                 onTap: () {
                   setState(() => _topicFilter = filter);
@@ -720,26 +813,33 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-
 // ─── Topic Tile ──────────────────────────────────────────────────────────────
 class _TopicTile extends StatelessWidget {
   final TopicModel topic;
+  final MockTestAttemptModel? latestResult;
   final Color subjectColor;
   final bool selectionMode;
   final bool isSelectable;
   final bool isSelected;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
+  final VoidCallback onStartTest;
+  final VoidCallback onViewPerformance;
+  final VoidCallback onRetake;
 
   const _TopicTile({
     super.key,
     required this.topic,
+    this.latestResult,
     required this.subjectColor,
     required this.selectionMode,
     required this.isSelectable,
     required this.isSelected,
     required this.onTap,
     required this.onLongPress,
+    required this.onStartTest,
+    required this.onViewPerformance,
+    required this.onRetake,
   });
 
   double get _studyProgress {
@@ -791,85 +891,96 @@ class _TopicTile extends StatelessWidget {
     final status = _statusOf(topic);
     final completed = status == _TopicStatus.completed;
 
+    if (completed && !selectionMode) {
+      return CompletedTopicAssessmentCard(
+        topic: topic,
+        latestResult: latestResult,
+        studyMetaLine: _studyMetaLine(topic),
+        onStartTest: onStartTest,
+        onViewPerformance: onViewPerformance,
+        onRetake: onRetake,
+      );
+    }
+
     return Material(
       color: isSelected ? subjectColor.withValues(alpha: 0.06) : Colors.white,
       borderRadius: BorderRadius.circular(12),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: isSelectable ? onTap : null,
-        onLongPress: isSelectable ? onLongPress : null,
+        onTap: (!selectionMode || isSelectable) ? onTap : null,
+        onLongPress: (!selectionMode || isSelectable) ? onLongPress : null,
         child: Opacity(
           opacity: selectionMode && completed ? 0.55 : 1,
           child: Container(
-          height: 76,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: isSelected ? subjectColor : const Color(0xFFE8EBF0),
-              width: isSelected ? 1.5 : 1,
-            ),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Row(
-                children: [
-                  _leadingIcon(status),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      topic.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                  Icon(
-                    selectionMode && isSelectable
-                        ? (isSelected
-                            ? Icons.check_circle_rounded
-                            : Icons.radio_button_unchecked_rounded)
-                        : Icons.chevron_right_rounded,
-                    size: 22,
-                    color: isSelected ? subjectColor : Colors.grey.shade400,
-                  ),
-                ],
+            height: 76,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: isSelected ? subjectColor : const Color(0xFFE8EBF0),
+                width: isSelected ? 1.5 : 1,
               ),
-              const SizedBox(height: 5),
-              Padding(
-                padding: const EdgeInsets.only(left: 32),
-                child: Row(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Row(
                   children: [
-                    Icon(
-                      Icons.schedule_rounded,
-                      size: 13,
-                      color: Colors.grey.shade500,
-                    ),
-                    const SizedBox(width: 4),
+                    _leadingIcon(status),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        _metaLine,
+                        topic.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade600,
-                          height: 1.2,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
                         ),
                       ),
                     ),
+                    Icon(
+                      selectionMode && isSelectable
+                          ? (isSelected
+                              ? Icons.check_circle_rounded
+                              : Icons.radio_button_unchecked_rounded)
+                          : Icons.chevron_right_rounded,
+                      size: 22,
+                      color: isSelected ? subjectColor : Colors.grey.shade400,
+                    ),
                   ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 5),
+                Padding(
+                  padding: const EdgeInsets.only(left: 32),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.schedule_rounded,
+                        size: 13,
+                        color: Colors.grey.shade500,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          _metaLine,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                            height: 1.2,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
         ),
       ),
     );
@@ -1046,117 +1157,6 @@ class _HourStepButton extends StatelessWidget {
             color: enabled ? AppColors.textPrimary : AppColors.textHint,
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _CompletedTopicSheet extends StatefulWidget {
-  final TopicModel topic;
-  final Color subjectColor;
-
-  const _CompletedTopicSheet({
-    required this.topic,
-    required this.subjectColor,
-  });
-
-  @override
-  State<_CompletedTopicSheet> createState() => _CompletedTopicSheetState();
-}
-
-class _CompletedTopicSheetState extends State<_CompletedTopicSheet> {
-  MockTestInfoModel? _mockTestInfo;
-  bool _loadingMockTest = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadMockTestInfo();
-  }
-
-  Future<void> _loadMockTestInfo() async {
-    try {
-      final info = await GetIt.I<MockTestRepository>().getTopicInfo(
-        widget.topic.id,
-        forceRemote: false,
-      );
-      if (mounted) {
-        setState(() {
-          _mockTestInfo = info.isConfigured && info.isActive ? info : null;
-          _loadingMockTest = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loadingMockTest = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final studied = _fmtH(widget.topic.actualHours);
-    final est = _fmtH(widget.topic.estimatedHours);
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: const Color(0xFFE5E7EB),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            widget.topic.title,
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '$est est. • $studied studied • 100%',
-            style: const TextStyle(
-              fontSize: 13,
-              color: AppColors.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 20),
-          if (_loadingMockTest)
-            const Center(child: CircularProgressIndicator())
-          else if (_mockTestInfo != null)
-            FilledButton.icon(
-              onPressed: _mockTestInfo!.canStart
-                  ? () {
-                      Navigator.pop(context);
-                      AppNavigation.pushIfDifferent(
-                        context,
-                        '/topic-test/${widget.topic.id}',
-                      );
-                    }
-                  : null,
-              icon: const Icon(Icons.quiz_outlined),
-              label: const Text('Start Mock Test'),
-              style: FilledButton.styleFrom(
-                backgroundColor: widget.subjectColor,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-            )
-          else
-            const Text(
-              'No mock test available for this topic.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.textSecondary),
-            ),
-        ],
       ),
     );
   }

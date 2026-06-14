@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/router/app_navigation.dart';
 import '../../../core/firebase/analytics_service.dart';
@@ -84,8 +83,6 @@ class _ExamSubjectsScreenState extends State<ExamSubjectsScreen> {
       context,
       '/subjects/exam/${widget.userExamId}/${subject.id}',
     );
-    if (!mounted) return;
-    await _loadFromLocal();
   }
 
   @override

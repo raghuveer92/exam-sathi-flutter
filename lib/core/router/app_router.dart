@@ -331,10 +331,15 @@ class AppRouter {
       ),
       GoRoute(
         path: '/mock-test/:topicId',
-        builder: (_, state) => TopicTestScreen(
-          topicId: int.parse(state.pathParameters['topicId']!),
-          topicTitle: state.uri.queryParameters['title'] ?? 'Topic',
-        ),
+        builder: (_, state) {
+          final query = state.uri.queryParameters;
+          return TopicTestScreen(
+            topicId: int.parse(state.pathParameters['topicId']!),
+            topicTitle: query['title'] ?? 'Topic',
+            subjectId: int.tryParse(query['subjectId'] ?? ''),
+            userExamId: int.tryParse(query['userExamId'] ?? ''),
+          );
+        },
       ),
       GoRoute(
         path: '/mock-test/:topicId/result/:attemptId',

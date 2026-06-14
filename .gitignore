@@ -16,3 +16,4 @@ pubspec.lock
 # android/app/google-services.json is safe to commit (Firebase key is public)
 # Keystore committed for CI — rotate if app goes to Google Play
 macos/Runner/GoogleService-Info.plist
+flutter_*.log

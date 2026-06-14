@@ -5,6 +5,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 /// Hive-backed local cache for offline-first reads.
 class LocalStore {
   static const String _boxName = 'examsaathi_cache';
+
   /// Exposed for integration-test cache wipe on web.
   static const String boxNameForTests = _boxName;
   static const String dashboardKey = 'dashboard';
@@ -50,6 +51,15 @@ class LocalStore {
 
   String? getString(String key) => _box?.get(key);
 
+  List<String> keysStartingWith(String prefix) {
+    final box = _box;
+    if (box == null) return const [];
+    return box.keys
+        .map((key) => key.toString())
+        .where((key) => key.startsWith(prefix))
+        .toList();
+  }
+
   Future<void> putString(String key, String value) async {
     await _box?.put(key, value);
   }
@@ -84,7 +94,11 @@ class LocalStore {
       '$userExamId:$topicId';
   String topicMockInfoKey(int topicId) => 'topic_mock_info_$topicId';
   String mockTestQuestionsKey(int topicId) => 'mock_test_questions_$topicId';
-  String mockTestLocalResultKey(String clientId) => 'mock_test_result_$clientId';
+  String mockTestLocalResultKey(String clientId) =>
+      'mock_test_result_$clientId';
+  static const latestTopicMockResultPrefix = 'mock_test_latest_result_topic_';
+  String latestTopicMockResultKey(int topicId) =>
+      '$latestTopicMockResultPrefix$topicId';
 
   bool isInitialDownloadComplete() =>
       getString(initialDownloadCompleteKey) == 'true';

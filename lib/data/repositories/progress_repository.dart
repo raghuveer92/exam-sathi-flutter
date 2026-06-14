@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
@@ -35,6 +36,9 @@ class ProgressRepository {
   final ProgressRebuildService _progressRebuildService;
   final _uuid = const Uuid();
 
+  /// In-memory subject detail — avoids re-materializing from catalog on every read.
+  final Map<String, SubjectDetailModel> _subjectDetailMem = {};
+
   Future<SubjectDetailModel?> getSubjectDetailCached(
     int subjectId, {
     required int userExamId,
@@ -45,23 +49,51 @@ class ProgressRepository {
     );
   }
 
-  /// Synchronous local read — cache first, then build from synced catalog.
+  /// Synchronous local read — Hive cache, then in-memory, then catalog (once per session).
   SubjectDetailModel? tryReadSubjectDetailOffline({
     required int subjectId,
     required int userExamId,
   }) {
     final key = _store.subjectDetailKey(userExamId, subjectId);
+    final mem = _subjectDetailMem[key];
+    if (mem != null) return mem;
+
     final cached = _store.getJson(key);
     if (cached != null) {
-      return SubjectDetailModel.fromJson(cached);
+      try {
+        final model = SubjectDetailModel.fromJson(cached);
+        _subjectDetailMem[key] = model;
+        return model;
+      } catch (_) {}
     }
 
     final built = _buildSubjectDetailMapFromCatalog(subjectId);
     if (built == null) return null;
 
     _applyTopicProgressTableToSubjectMap(built, userExamId, subjectId);
+    _rememberSubjectDetail(userExamId, subjectId, built);
     unawaited(_store.putJson(key, built));
-    return SubjectDetailModel.fromJson(built);
+    return _subjectDetailMem[key];
+  }
+
+  void _rememberSubjectDetail(
+    int userExamId,
+    int subjectId,
+    Map<String, dynamic> data,
+  ) {
+    try {
+      final key = _store.subjectDetailKey(userExamId, subjectId);
+      _subjectDetailMem[key] = SubjectDetailModel.fromJson(data);
+    } catch (_) {}
+  }
+
+  Future<void> _persistSubjectDetail(
+    int userExamId,
+    int subjectId,
+    Map<String, dynamic> data,
+  ) async {
+    _rememberSubjectDetail(userExamId, subjectId, data);
+    await _store.putJson(_store.subjectDetailKey(userExamId, subjectId), data);
   }
 
   /// Count topics already cached (or buildable from catalog) for enrollment verification.
@@ -180,7 +212,8 @@ class ProgressRepository {
     required int userExamId,
     bool forceRemote = false,
   }) async {
-    final cached = await getSubjectDetailCached(subjectId, userExamId: userExamId);
+    final cached =
+        await getSubjectDetailCached(subjectId, userExamId: userExamId);
     if (!forceRemote) {
       if (cached != null) return cached;
       final fromCatalog = await _materializeSubjectDetailFromCatalog(
@@ -193,17 +226,16 @@ class ProgressRepository {
       );
     }
     try {
-      ApiCallTracker.instance.record('GET ${ApiEndpoints.subjectDetail(subjectId)}');
-      final response = await _client.dio.get(ApiEndpoints.subjectDetail(subjectId));
+      ApiCallTracker.instance
+          .record('GET ${ApiEndpoints.subjectDetail(subjectId)}');
+      final response =
+          await _client.dio.get(ApiEndpoints.subjectDetail(subjectId));
       final data = response.data['data'] as Map<String, dynamic>;
       final localMap =
           _store.getJson(_store.subjectDetailKey(userExamId, subjectId));
       final merged = _mergeSubjectDetailWithLocal(data, localMap);
       _applyTopicProgressTableToSubjectMap(merged, userExamId, subjectId);
-      await _store.putJson(
-        _store.subjectDetailKey(userExamId, subjectId),
-        merged,
-      );
+      await _persistSubjectDetail(userExamId, subjectId, merged);
       return SubjectDetailModel.fromJson(merged);
     } catch (_) {
       if (cached != null) return cached;
@@ -285,16 +317,18 @@ class ProgressRepository {
             actualHours: (row['actualHours'] as num?)?.toDouble() ?? 0.0,
             isCompleted: row['isCompleted'] as bool? ?? false,
             status: row['status'] as String?,
+            testStatus: row['testStatus'] as String?,
+            lastTestScore: (row['lastTestScore'] as num?)?.toDouble(),
+            bestTestScore: (row['bestTestScore'] as num?)?.toDouble(),
+            masteryScore: (row['masteryScore'] as num?)?.toDouble(),
+            totalTestsAttempted: (row['totalTestsAttempted'] as num?)?.toInt(),
           )) {
             applied++;
           }
         }
 
         _recalculateSubjectStats(data);
-        await _store.putJson(
-          _store.subjectDetailKey(userExamId, subjectId),
-          data,
-        );
+        await _persistSubjectDetail(userExamId, subjectId, data);
       }
     }
     return applied;
@@ -305,13 +339,14 @@ class ProgressRepository {
     required int userExamId,
     required int subjectId,
   }) async {
-    if (_store.getJson(_store.subjectDetailKey(userExamId, subjectId)) != null) {
+    if (_store.getJson(_store.subjectDetailKey(userExamId, subjectId)) !=
+        null) {
       return getSubjectDetailCached(subjectId, userExamId: userExamId);
     }
     final data = _buildSubjectDetailMapFromCatalog(subjectId);
     if (data == null) return null;
     _applyTopicProgressTableToSubjectMap(data, userExamId, subjectId);
-    await _store.putJson(_store.subjectDetailKey(userExamId, subjectId), data);
+    await _persistSubjectDetail(userExamId, subjectId, data);
     return SubjectDetailModel.fromJson(data);
   }
 
@@ -815,7 +850,10 @@ class ProgressRepository {
     final userExamId = (payload['userExamId'] as num?)?.toInt();
     final topics = payload['topics'];
     final clientId = item['clientId'] as String?;
-    if (userExamId == null || topics is! List || topics.isEmpty || clientId == null) {
+    if (userExamId == null ||
+        topics is! List ||
+        topics.isEmpty ||
+        clientId == null) {
       if (clientId != null) {
         await _offlineQueue.removeByClientId(clientId);
       }
@@ -966,7 +1004,7 @@ class ProgressRepository {
     }
 
     _recalculateSubjectStats(data);
-    await _store.putJson(_store.subjectDetailKey(userExamId, subjectId), data);
+    await _persistSubjectDetail(userExamId, subjectId, data);
     return SubjectDetailModel.fromJson(data);
   }
 
@@ -989,8 +1027,7 @@ class ProgressRepository {
           if (topic is! Map<String, dynamic>) continue;
           chTotal++;
           totalTopics++;
-          totalStudyHours +=
-              ((topic['actualHours'] as num?) ?? 0).toDouble();
+          totalStudyHours += ((topic['actualHours'] as num?) ?? 0).toDouble();
           if (topic['isCompleted'] == true) {
             chCompleted++;
             completedTopics++;
@@ -1093,9 +1130,7 @@ class ProgressRepository {
       );
     }
 
-    if (enqueueHoursSync &&
-        studyHoursDelta != null &&
-        studyHoursDelta != 0) {
+    if (enqueueHoursSync && studyHoursDelta != null && studyHoursDelta != 0) {
       await enqueueTopicStudyHours(
         userExamId: userExamId,
         topicId: topicId,
@@ -1173,6 +1208,12 @@ class ProgressRepository {
         actualHours: (raw['actualHours'] as num?)?.toDouble() ?? 0.0,
         syncStatus: LocalTables.syncStatusSynced,
         updatedAt: raw['updatedAt'] as String?,
+        status: raw['status'] as String?,
+        testStatus: raw['testStatus'] as String?,
+        lastTestScore: (raw['lastTestScore'] as num?)?.toDouble(),
+        bestTestScore: (raw['bestTestScore'] as num?)?.toDouble(),
+        masteryScore: (raw['masteryScore'] as num?)?.toDouble(),
+        totalTestsAttempted: (raw['totalTestsAttempted'] as num?)?.toInt(),
       );
       count++;
     }
@@ -1221,16 +1262,18 @@ class ProgressRepository {
             actualHours: (row['actualHours'] as num?)?.toDouble() ?? 0.0,
             isCompleted: row['isCompleted'] as bool? ?? false,
             status: row['status'] as String?,
+            testStatus: row['testStatus'] as String?,
+            lastTestScore: (row['lastTestScore'] as num?)?.toDouble(),
+            bestTestScore: (row['bestTestScore'] as num?)?.toDouble(),
+            masteryScore: (row['masteryScore'] as num?)?.toDouble(),
+            totalTestsAttempted: (row['totalTestsAttempted'] as num?)?.toInt(),
           )) {
             applied++;
           }
         }
 
         _recalculateSubjectStats(data);
-        await _store.putJson(
-          _store.subjectDetailKey(userExamId, subjectId),
-          data,
-        );
+        await _persistSubjectDetail(userExamId, subjectId, data);
       }
     }
     return applied;
@@ -1267,11 +1310,62 @@ class ProgressRepository {
         actualHours: (row['actualHours'] as num?)?.toDouble() ?? 0.0,
         isCompleted: row['isCompleted'] as bool? ?? false,
         status: row['status'] as String?,
+        testStatus: row['testStatus'] as String?,
+        lastTestScore: (row['lastTestScore'] as num?)?.toDouble(),
+        bestTestScore: (row['bestTestScore'] as num?)?.toDouble(),
+        masteryScore: (row['masteryScore'] as num?)?.toDouble(),
+        totalTestsAttempted: (row['totalTestsAttempted'] as num?)?.toInt(),
       )) {
         changed = true;
       }
     }
     if (changed) _recalculateSubjectStats(data);
+  }
+
+  /// Updates cached subject detail after a topic mock test submit (offline-first UI).
+  Future<bool> patchTopicMasteryInSubjectDetail({
+    required int userExamId,
+    required int subjectId,
+    required int topicId,
+    required double testScore,
+  }) async {
+    final key = _store.subjectDetailKey(userExamId, subjectId);
+    final data = _store.getJson(key);
+    if (data == null) return false;
+
+    final chapters = data['chapters'];
+    if (chapters is! List) return false;
+
+    for (final chapter in chapters) {
+      if (chapter is! Map<String, dynamic>) continue;
+      final topics = chapter['topics'];
+      if (topics is! List) continue;
+      for (final topic in topics) {
+        if (topic is! Map<String, dynamic>) continue;
+        if ((topic['id'] as num?)?.toInt() != topicId) continue;
+
+        final prevAttempts =
+            (topic['totalTestsAttempted'] as num?)?.toInt() ?? 0;
+        final prevBest = (topic['masteryScore'] as num?)?.toDouble();
+        final best =
+            prevBest == null ? testScore : math.max(prevBest, testScore);
+
+        topic['totalTestsAttempted'] = prevAttempts + 1;
+        topic['masteryScore'] = best;
+        topic['masteryLevel'] = _masteryLevelFromScore(best);
+        topic['testStatus'] = best >= 90 ? 'COMPLETED' : 'AVAILABLE';
+        await _persistSubjectDetail(userExamId, subjectId, data);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  String _masteryLevelFromScore(double score) {
+    if (score <= 40) return 'BEGINNER';
+    if (score <= 60) return 'DEVELOPING';
+    if (score <= 80) return 'PROFICIENT';
+    return 'MASTERED';
   }
 
   bool _patchTopicRowInMap(
@@ -1280,6 +1374,11 @@ class ProgressRepository {
     required double actualHours,
     required bool isCompleted,
     String? status,
+    String? testStatus,
+    double? lastTestScore,
+    double? bestTestScore,
+    double? masteryScore,
+    int? totalTestsAttempted,
   }) {
     final chapters = data['chapters'];
     if (chapters is! List) return false;
@@ -1300,6 +1399,16 @@ class ProgressRepository {
           topic['status'] = 'COMPLETED';
         } else if (actualHours > 0) {
           topic['status'] = 'IN_PROGRESS';
+        }
+        if (testStatus != null) topic['testStatus'] = testStatus;
+        if (lastTestScore != null) topic['lastTestScore'] = lastTestScore;
+        if (bestTestScore != null) topic['bestTestScore'] = bestTestScore;
+        if (masteryScore != null) {
+          topic['masteryScore'] = masteryScore;
+          topic['masteryLevel'] = _masteryLevelFromScore(masteryScore);
+        }
+        if (totalTestsAttempted != null) {
+          topic['totalTestsAttempted'] = totalTestsAttempted;
         }
         return true;
       }
@@ -1360,6 +1469,12 @@ class ProgressRepository {
     required double actualHours,
     required String syncStatus,
     String? updatedAt,
+    String? status,
+    String? testStatus,
+    double? lastTestScore,
+    double? bestTestScore,
+    double? masteryScore,
+    int? totalTestsAttempted,
   }) async {
     final table = Map<String, dynamic>.from(
       _store.getJson(LocalTables.topicProgress) ?? {},
@@ -1372,6 +1487,13 @@ class ProgressRepository {
       'subjectId': subjectId,
       'isCompleted': isCompleted,
       'actualHours': actualHours,
+      if (status != null) 'status': status,
+      if (testStatus != null) 'testStatus': testStatus,
+      if (lastTestScore != null) 'lastTestScore': lastTestScore,
+      if (bestTestScore != null) 'bestTestScore': bestTestScore,
+      if (masteryScore != null) 'masteryScore': masteryScore,
+      if (totalTestsAttempted != null)
+        'totalTestsAttempted': totalTestsAttempted,
       'syncStatus': syncStatus,
       'updatedAt': updatedAt ?? DateTime.now().toIso8601String(),
     };

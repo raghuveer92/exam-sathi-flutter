@@ -16,6 +16,11 @@ class TopicModel extends Equatable {
   final String status;
   final String? completedAt;
   final String? lastStudiedAt;
+  final int totalTestsAttempted;
+  final double? masteryScore;
+  /// BEGINNER | DEVELOPING | PROFICIENT | MASTERED
+  final String? masteryLevel;
+  final String testStatus;
 
   const TopicModel({
     required this.id,
@@ -32,7 +37,14 @@ class TopicModel extends Equatable {
     this.status = 'NOT_STARTED',
     this.completedAt,
     this.lastStudiedAt,
+    this.totalTestsAttempted = 0,
+    this.masteryScore,
+    this.masteryLevel,
+    this.testStatus = 'LOCKED',
   });
+
+  bool get hasAssessment =>
+      totalTestsAttempted > 0 && masteryScore != null;
 
   factory TopicModel.fromJson(Map<String, dynamic> json) => TopicModel(
         id: (json['id'] as num).toInt(),
@@ -49,9 +61,23 @@ class TopicModel extends Equatable {
         status: (json['status'] as String?) ?? 'NOT_STARTED',
         completedAt: json['completedAt'] as String?,
         lastStudiedAt: json['lastStudiedAt'] as String?,
+        totalTestsAttempted:
+            (json['totalTestsAttempted'] as num?)?.toInt() ?? 0,
+        masteryScore: (json['masteryScore'] as num?)?.toDouble(),
+        masteryLevel: json['masteryLevel'] as String?,
+        testStatus: (json['testStatus'] as String?) ?? 'LOCKED',
       );
 
-  TopicModel copyWith({bool? isCompleted, double? actualHours, String? status}) => TopicModel(
+  TopicModel copyWith({
+    bool? isCompleted,
+    double? actualHours,
+    String? status,
+    int? totalTestsAttempted,
+    double? masteryScore,
+    String? masteryLevel,
+    String? testStatus,
+  }) =>
+      TopicModel(
         id: id,
         chapterId: chapterId,
         chapterTitle: chapterTitle,
@@ -66,8 +92,21 @@ class TopicModel extends Equatable {
         status: status ?? this.status,
         completedAt: completedAt,
         lastStudiedAt: lastStudiedAt,
+        totalTestsAttempted: totalTestsAttempted ?? this.totalTestsAttempted,
+        masteryScore: masteryScore ?? this.masteryScore,
+        masteryLevel: masteryLevel ?? this.masteryLevel,
+        testStatus: testStatus ?? this.testStatus,
       );
 
   @override
-  List<Object?> get props => [id, title, isCompleted, status, actualHours];
+  List<Object?> get props => [
+        id,
+        title,
+        isCompleted,
+        status,
+        actualHours,
+        totalTestsAttempted,
+        masteryScore,
+        masteryLevel,
+      ];
 }

@@ -134,6 +134,29 @@ class AppNavigation {
     return context.push<Object?>(location, extra: extra);
   }
 
+  /// Topic mock test screen (Google Sheets or legacy offline bank).
+  static String mockTestTopic(
+    int topicId, {
+    String? title,
+    int? subjectId,
+    int? userExamId,
+  }) {
+    final params = <String, String>{};
+    if (title != null && title.isNotEmpty) {
+      params['title'] = title;
+    }
+    if (subjectId != null) params['subjectId'] = '$subjectId';
+    if (userExamId != null) params['userExamId'] = '$userExamId';
+    if (params.isEmpty) return '/mock-test/$topicId';
+    final query = params.entries
+        .map(
+          (e) =>
+              '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}',
+        )
+        .join('&');
+    return '/mock-test/$topicId?$query';
+  }
+
   /// Pop only — never pushes a replacement route.
   static bool pop<T extends Object?>(BuildContext context, [T? result]) {
     if (!context.canPop()) return false;

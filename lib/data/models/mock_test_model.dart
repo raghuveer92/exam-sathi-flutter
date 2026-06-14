@@ -7,6 +7,8 @@ class MockTestInfoModel {
   final int availableQuestionCount;
   final String difficultyFilter;
   final bool isActive;
+  final bool sheetBacked;
+  final bool? canStartFromApi;
 
   MockTestInfoModel({
     this.id,
@@ -17,6 +19,8 @@ class MockTestInfoModel {
     required this.availableQuestionCount,
     required this.difficultyFilter,
     required this.isActive,
+    this.sheetBacked = false,
+    this.canStartFromApi,
   });
 
   factory MockTestInfoModel.fromJson(Map<String, dynamic> json) {
@@ -26,20 +30,24 @@ class MockTestInfoModel {
       topicTitle: json['topicTitle'] as String? ?? '',
       numQuestions: json['numQuestions'] as int? ?? 10,
       durationMinutes: json['durationMinutes'] as int? ?? 15,
-      availableQuestionCount: json['availableQuestionCount'] as int? ?? 0,
+      availableQuestionCount: (json['availableQuestionCount'] as num?)?.toInt() ?? 0,
       difficultyFilter: json['difficultyFilter'] as String? ?? 'ALL',
       isActive: json['isActive'] as bool? ?? false,
+      sheetBacked: json['sheetBacked'] as bool? ?? false,
+      canStartFromApi: json['canStart'] as bool?,
     );
   }
 
-  bool get isConfigured => id != null;
+  bool get isConfigured => id != null || sheetBacked;
 
   bool get canStart =>
-      isConfigured && isActive && availableQuestionCount >= numQuestions;
+      canStartFromApi ??
+      (isConfigured && isActive && availableQuestionCount >= numQuestions);
 }
 
 class MockTestQuestionModel {
   final int questionId;
+  final String? sheetQuestionId;
   final String questionText;
   final String questionType;
   final double marks;
@@ -50,6 +58,7 @@ class MockTestQuestionModel {
 
   MockTestQuestionModel({
     required this.questionId,
+    this.sheetQuestionId,
     required this.questionText,
     required this.questionType,
     required this.marks,
@@ -67,6 +76,7 @@ class MockTestQuestionModel {
   }) {
     return MockTestQuestionModel(
       questionId: questionId,
+      sheetQuestionId: sheetQuestionId,
       questionText: questionText,
       questionType: questionType,
       marks: marks,
@@ -79,7 +89,8 @@ class MockTestQuestionModel {
 
   factory MockTestQuestionModel.fromJson(Map<String, dynamic> json) {
     return MockTestQuestionModel(
-      questionId: json['questionId'] as int,
+      questionId: (json['questionId'] as num?)?.toInt() ?? 0,
+      sheetQuestionId: json['sheetQuestionId'] as String?,
       questionText: json['questionText'] as String? ?? '',
       questionType: json['questionType'] as String? ?? 'SINGLE_CORRECT',
       marks: (json['marks'] as num?)?.toDouble() ?? 1,
@@ -108,7 +119,7 @@ class MockTestOptionModel {
 
   factory MockTestOptionModel.fromJson(Map<String, dynamic> json) {
     return MockTestOptionModel(
-      id: json['id'] as int,
+      id: (json['id'] as num?)?.toInt() ?? 0,
       optionKey: json['optionKey'] as String? ?? '',
       optionText: json['optionText'] as String? ?? '',
     );
@@ -154,8 +165,8 @@ class MockTestAttemptModel {
 
   factory MockTestAttemptModel.fromJson(Map<String, dynamic> json) {
     return MockTestAttemptModel(
-      id: json['id'] as int,
-      topicId: json['topicId'] as int,
+      id: (json['id'] as num).toInt(),
+      topicId: (json['topicId'] as num).toInt(),
       topicTitle: json['topicTitle'] as String? ?? '',
       status: json['status'] as String? ?? 'IN_PROGRESS',
       durationMinutes: json['durationMinutes'] as int? ?? 15,
@@ -179,6 +190,7 @@ class MockTestAttemptModel {
 
 class MockTestReviewModel {
   final int questionId;
+  final String? sheetQuestionId;
   final String questionText;
   final List<String> selectedOptionKeys;
   final List<String> correctOptionKeys;
@@ -188,6 +200,7 @@ class MockTestReviewModel {
 
   MockTestReviewModel({
     required this.questionId,
+    this.sheetQuestionId,
     required this.questionText,
     required this.selectedOptionKeys,
     required this.correctOptionKeys,
@@ -198,7 +211,8 @@ class MockTestReviewModel {
 
   factory MockTestReviewModel.fromJson(Map<String, dynamic> json) {
     return MockTestReviewModel(
-      questionId: json['questionId'] as int,
+      questionId: (json['questionId'] as num?)?.toInt() ?? 0,
+      sheetQuestionId: json['sheetQuestionId'] as String?,
       questionText: json['questionText'] as String? ?? '',
       selectedOptionKeys: (json['selectedOptionKeys'] as List<dynamic>? ?? [])
           .map((e) => e.toString())

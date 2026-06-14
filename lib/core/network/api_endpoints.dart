@@ -66,6 +66,12 @@ class ApiEndpoints {
   static String mockTestAttempt(int attemptId) => '/mock-tests/attempts/$attemptId';
   static const String mockTestPerformance = '/mock-tests/performance';
 
+  // Google Sheets topic mock tests
+  static String sheetTopicStart(int topicId) => '/mock/topic/start?topicId=$topicId';
+  static const String sheetTopicSubmit = '/mock/topic/submit';
+  static String sheetTopicResult(int attemptId) => '/mock/topic/result?attemptId=$attemptId';
+  static String sheetTopicMastery(int topicId) => '/mock/topic/mastery?topicId=$topicId';
+
   // Sync (offline-first)
   static const String syncCatalog = '/sync/catalog';
   static const String syncBundle = '/sync/bundle';
