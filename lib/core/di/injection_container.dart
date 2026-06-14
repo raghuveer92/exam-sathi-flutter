@@ -11,6 +11,8 @@ import '../study/daily_target_calculator.dart';
 import '../sync/offline_queue_service.dart';
 import '../sync/progress_rebuild_service.dart';
 import '../sync/sync_service.dart';
+import '../onboarding/onboarding_wizard_store.dart';
+import '../testing/integration_test_reset.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../data/repositories/dashboard_repository.dart';
 import '../../data/repositories/exam_catalog_repository.dart';
@@ -25,6 +27,11 @@ Future<void> setupDependencies() async {
   final sl = GetIt.I;
 
   await sl.reset();
+
+  const isIntegrationTest = bool.fromEnvironment('INTEGRATION_TEST');
+  if (isIntegrationTest) {
+    await resetIntegrationTestPersistence();
+  }
 
   final localStore = LocalStore();
   await localStore.init();
@@ -113,6 +120,9 @@ Future<void> setupDependencies() async {
     sync.startConnectivityListener();
     return sync;
   });
+
+  sl.registerLazySingleton<OnboardingWizardStore>(
+      () => OnboardingWizardStore());
 
   sl.registerLazySingleton<AuthBloc>(
       () => AuthBloc(authRepository: sl<AuthRepository>()));

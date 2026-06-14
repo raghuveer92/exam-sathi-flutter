@@ -7,6 +7,8 @@ class GradientButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final bool isLoading;
   final double? width;
+  /// When set, applied to the inner [ElevatedButton] for reliable E2E taps.
+  final Key? buttonKey;
 
   const GradientButton({
     super.key,
@@ -14,6 +16,7 @@ class GradientButton extends StatelessWidget {
     this.onPressed,
     this.isLoading = false,
     this.width,
+    this.buttonKey,
   });
 
   @override
@@ -38,6 +41,7 @@ class GradientButton extends StatelessWidget {
               : [],
         ),
         child: ElevatedButton(
+          key: buttonKey ?? key,
           onPressed: isLoading ? null : onPressed,
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.transparent,

@@ -23,6 +23,9 @@ import '../../presentation/screens/profile/my_exams_screen.dart';
 import '../../presentation/screens/onboarding/exam_selection_screen.dart';
 import '../../presentation/screens/onboarding/exam_goal_setup_screen.dart';
 import '../../presentation/screens/onboarding/add_exam_wizard_screen.dart';
+import '../../presentation/screens/onboarding/onboarding_choose_exam_screen.dart';
+import '../../presentation/screens/onboarding/onboarding_set_goal_screen.dart';
+import '../../presentation/screens/onboarding/onboarding_confirm_screen.dart';
 import '../../presentation/screens/mock_test/test_result_screen.dart';
 import '../../presentation/screens/mock_test/topic_test_screen.dart';
 import '../../data/models/mock_test_model.dart';
@@ -31,6 +34,8 @@ import '../../presentation/screens/main/main_scaffold.dart';
 import '../../presentation/screens/offline/offline_setup_screen.dart';
 import '../../presentation/screens/splash/splash_screen.dart';
 import '../../core/local/local_store.dart';
+import '../../data/repositories/progress_repository.dart';
+import 'app_navigation.dart';
 import 'package:get_it/get_it.dart';
 
 /// Bridges a Bloc stream into a [ChangeNotifier] so GoRouter can
@@ -47,20 +52,56 @@ class _AuthRefreshNotifier extends ChangeNotifier {
   }
 }
 
+/// Skip redirect when already on the target route (prevents duplicate stack entries).
+String? _redirectUnlessCurrent(String target, GoRouterState state) {
+  if (AppNavigation.normalizeLocation(state.uri.toString()) ==
+      AppNavigation.normalizeLocation(target)) {
+    return null;
+  }
+  return target;
+}
+
+/// Offline content is ready when the flag is set OR local cache already has topics.
+bool _isOfflineContentReady() {
+  final store = GetIt.I<LocalStore>();
+  if (store.isInitialDownloadComplete()) return true;
+  return GetIt.I<ProgressRepository>().hasOfflineStudyContent();
+}
+
 class AppRouter {
   static GoRouter createRouter(AuthBloc authBloc) {
     final rootNavigatorKey = GlobalKey<NavigatorState>();
-    final shellNavigatorKey = GlobalKey<NavigatorState>();
-    return _buildRouter(authBloc, rootNavigatorKey, shellNavigatorKey);
+    final homeNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'homeNav');
+    final subjectsNavigatorKey =
+        GlobalKey<NavigatorState>(debugLabel: 'subjectsNav');
+    final analyticsNavigatorKey =
+        GlobalKey<NavigatorState>(debugLabel: 'analyticsNav');
+    final profileNavigatorKey =
+        GlobalKey<NavigatorState>(debugLabel: 'profileNav');
+    return _buildRouter(
+      authBloc,
+      rootNavigatorKey,
+      homeNavigatorKey,
+      subjectsNavigatorKey,
+      analyticsNavigatorKey,
+      profileNavigatorKey,
+    );
   }
 
   static GoRouter _buildRouter(
     AuthBloc authBloc,
     GlobalKey<NavigatorState> rootNavigatorKey,
-    GlobalKey<NavigatorState> shellNavigatorKey,
+    GlobalKey<NavigatorState> homeNavigatorKey,
+    GlobalKey<NavigatorState> subjectsNavigatorKey,
+    GlobalKey<NavigatorState> analyticsNavigatorKey,
+    GlobalKey<NavigatorState> profileNavigatorKey,
   ) =>
       GoRouter(
     navigatorKey: rootNavigatorKey,
+    // On web: don't record every go()/redirect as a browser history entry.
+    // Back is handled in-app via PopScope + context.pop(); prevents loops
+    // through tabs, download screen, onboarding, etc.
+    routerNeglect: kIsWeb,
     observers: kIsWeb ? const [] : [AnalyticsService.observer],
     initialLocation: '/splash',
     refreshListenable: _AuthRefreshNotifier(authBloc.stream),
@@ -79,11 +120,28 @@ class AppRouter {
       final isOnboardingMyExams =
           isMyExams && state.uri.queryParameters['onboarding'] == '1';
       final isAddExamWizard = loc.startsWith('/add-exam');
-      final isOnboardingWizard =
-          isAddExamWizard && state.uri.queryParameters['onboarding'] == '1';
+      final isOnboardingRoute = loc.startsWith('/onboarding/');
+      final isOnboardingWizard = isOnboardingRoute;
       final isChangeExamFlow = isSelectExam && state.uri.queryParameters['change'] == '1';
+      const enrollmentSetupPath =
+          '/offline-setup?mode=enrollment&redirect=%2Fhome&title=Downloading%20Exam%20Content';
+      final isOfflineSetup = loc == '/offline-setup';
 
-      if (authState is AuthLoading && !isSplash && !isAuthForm) return '/splash';
+      // Never show download screen after content is already cached.
+      if (authState is AuthAuthenticated &&
+          isOfflineSetup &&
+          _isOfflineContentReady()) {
+        return _redirectUnlessCurrent('/home', state);
+      }
+
+      // Keep the onboarding wizard mounted while auth re-checks (getMe) — avoids
+      // resetting exam selection mid-flow during integration tests and live use.
+      if (authState is AuthLoading &&
+          !isSplash &&
+          !isAuthForm &&
+          !isOnboardingWizard) {
+        return '/splash';
+      }
       if (authState is AuthInitial && !isSplash) return '/splash';
 
       if (authState is AuthError && isSplash) return isRegister ? '/register' : '/login';
@@ -112,21 +170,31 @@ class AppRouter {
       if (authState is AuthAuthenticated) {
         final user = authState.user;
 
+        // Keep the wizard mounted while the user is still picking an exam / goal.
+        // Auth may refresh (getMe) mid-flow; without this the route remounts and
+        // step 0 appears again even though subject-groups already loaded.
+        if (isOnboardingWizard && !user.hasSelectedExam) {
+          return null;
+        }
+
         if (user.needsEmailVerification) {
           return '/login';
         }
 
-        final downloadDone =
-            GetIt.I<LocalStore>().isInitialDownloadComplete();
+        final downloadDone = _isOfflineContentReady();
 
         if (isSplash || loc == '/login' || loc == '/register') {
-          if (!user.hasExamGoal) return '/add-exam?onboarding=1';
-          if (!downloadDone) return '/offline-setup';
-          return '/home';
+          if (!user.hasExamGoal) {
+            return _redirectUnlessCurrent('/onboarding/choose-exam', state);
+          }
+          if (!downloadDone) {
+            return _redirectUnlessCurrent(enrollmentSetupPath, state);
+          }
+          return _redirectUnlessCurrent('/home', state);
         }
 
-        if (!downloadDone && loc != '/offline-setup' && !isAddExamWizard) {
-          return '/offline-setup';
+        if (!downloadDone && loc != '/offline-setup' && !isAddExamWizard && !isOnboardingRoute) {
+          return _redirectUnlessCurrent(enrollmentSetupPath, state);
         }
         // Advance forward when setup step completes
         if (user.hasSelectedExam && user.hasExamGoal &&
@@ -134,24 +202,26 @@ class AppRouter {
                 (isSelectExam && !isChangeExamFlow) ||
                 isOnboardingMyExams ||
                 isOnboardingWizard)) {
-          if (!downloadDone) return '/offline-setup';
-          return '/home';
+          if (!downloadDone) {
+            return _redirectUnlessCurrent(enrollmentSetupPath, state);
+          }
+          return _redirectUnlessCurrent('/home', state);
         }
         if (!user.hasSelectedExam && loc == '/exam-goal') {
-          return '/add-exam?onboarding=1';
+          return _redirectUnlessCurrent('/onboarding/choose-exam', state);
         }
         if (!user.hasExamGoal && isSelectExam && !isChangeExamFlow) {
-          return '/add-exam?onboarding=1';
+          return _redirectUnlessCurrent('/onboarding/choose-exam', state);
         }
         // Block dashboard if setup incomplete
         if (!user.hasSelectedExam && !isOnboardingMyExams && !isOnboardingWizard) {
-          return '/add-exam?onboarding=1';
+          return _redirectUnlessCurrent('/onboarding/choose-exam', state);
         }
         if (user.hasSelectedExam && !user.hasExamGoal &&
             loc != '/exam-goal' &&
             !isOnboardingMyExams &&
             !isOnboardingWizard) {
-          return '/add-exam?onboarding=1';
+          return _redirectUnlessCurrent('/onboarding/choose-exam', state);
         }
       }
 
@@ -227,8 +297,36 @@ class AppRouter {
       ),
       GoRoute(
         path: '/add-exam',
-        builder: (_, state) => AddExamWizardScreen(
-          isOnboarding: state.uri.queryParameters['onboarding'] == '1',
+        redirect: (_, state) {
+          if (state.uri.queryParameters['onboarding'] == '1') {
+            return '/onboarding/choose-exam';
+          }
+          return null;
+        },
+        pageBuilder: (context, state) => NoTransitionPage<void>(
+          key: state.pageKey,
+          child: const AddExamWizardScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '/onboarding/choose-exam',
+        pageBuilder: (_, __) => const NoTransitionPage<void>(
+          key: ValueKey<String>('onboarding-choose-exam'),
+          child: OnboardingChooseExamScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '/onboarding/set-goal',
+        pageBuilder: (_, __) => const NoTransitionPage<void>(
+          key: ValueKey<String>('onboarding-set-goal'),
+          child: OnboardingSetGoalScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '/onboarding/confirm',
+        pageBuilder: (_, __) => const NoTransitionPage<void>(
+          key: ValueKey<String>('onboarding-confirm'),
+          child: OnboardingConfirmScreen(),
         ),
       ),
       GoRoute(
@@ -247,70 +345,96 @@ class AppRouter {
         ),
       ),
 
-      // Main scaffold with bottom navigation
-      ShellRoute(
-        navigatorKey: shellNavigatorKey,
-        builder: (context, state, child) => MainScaffold(child: child),
-        routes: [
-          GoRoute(path: '/home', builder: (_, __) => const DashboardScreen()),
-          GoRoute(
-            path: '/subjects',
-            builder: (_, __) => const SubjectsScreen(),
+      // Main scaffold — each tab has its own navigator stack (IndexedStack).
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) =>
+            MainScaffold(navigationShell: navigationShell),
+        branches: [
+          StatefulShellBranch(
+            navigatorKey: homeNavigatorKey,
             routes: [
               GoRoute(
-                path: 'exam/:userExamId',
-                builder: (_, state) => ExamSubjectsScreen(
-                  userExamId:
-                      int.parse(state.pathParameters['userExamId']!),
-                ),
-                routes: [
-                  GoRoute(
-                    path: ':subjectId',
-                    builder: (_, state) => SubjectDetailScreen(
-                      userExamId: int.parse(
-                        state.pathParameters['userExamId']!,
-                      ),
-                      subjectId: int.parse(
-                        state.pathParameters['subjectId']!,
-                      ),
-                    ),
-                    routes: [
-                      GoRoute(
-                        path: 'chapter/:chapterId',
-                        builder: (_, state) => TopicListScreen(
-                          chapterId: int.parse(
-                            state.pathParameters['chapterId']!,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              GoRoute(
-                path: ':subjectId',
-                redirect: (_, state) {
-                  final subjectId = state.pathParameters['subjectId'];
-                  final userExamId = state.uri.queryParameters['userExamId'];
-                  if (userExamId != null && subjectId != null) {
-                    return '/subjects/exam/$userExamId/$subjectId';
-                  }
-                  return '/subjects';
-                },
+                path: '/home',
+                builder: (_, __) => const DashboardScreen(),
               ),
             ],
           ),
-          GoRoute(
-            path: '/study',
-            redirect: (_, __) => '/home',
+          StatefulShellBranch(
+            navigatorKey: subjectsNavigatorKey,
+            routes: [
+              GoRoute(
+                path: '/subjects',
+                builder: (_, __) => const SubjectsScreen(),
+                routes: [
+                  GoRoute(
+                    path: 'exam/:userExamId',
+                    builder: (_, state) => ExamSubjectsScreen(
+                      userExamId:
+                          int.parse(state.pathParameters['userExamId']!),
+                    ),
+                    routes: [
+                      GoRoute(
+                        path: ':subjectId',
+                        builder: (_, state) => SubjectDetailScreen(
+                          userExamId: int.parse(
+                            state.pathParameters['userExamId']!,
+                          ),
+                          subjectId: int.parse(
+                            state.pathParameters['subjectId']!,
+                          ),
+                        ),
+                        routes: [
+                          GoRoute(
+                            path: 'chapter/:chapterId',
+                            builder: (_, state) => TopicListScreen(
+                              chapterId: int.parse(
+                                state.pathParameters['chapterId']!,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  GoRoute(
+                    path: ':subjectId',
+                    redirect: (_, state) {
+                      final subjectId = state.pathParameters['subjectId'];
+                      final userExamId = state.uri.queryParameters['userExamId'];
+                      if (userExamId != null && subjectId != null) {
+                        return '/subjects/exam/$userExamId/$subjectId';
+                      }
+                      return '/subjects';
+                    },
+                  ),
+                ],
+              ),
+            ],
           ),
-          GoRoute(path: '/analytics', builder: (_, __) => const AnalyticsScreen()),
-          GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
-          GoRoute(
-            path: '/my-exams',
-            builder: (_, state) => MyExamsScreen(
-              isOnboarding: state.uri.queryParameters['onboarding'] == '1',
-            ),
+          StatefulShellBranch(
+            navigatorKey: analyticsNavigatorKey,
+            routes: [
+              GoRoute(
+                path: '/analytics',
+                builder: (_, __) => const AnalyticsScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            navigatorKey: profileNavigatorKey,
+            routes: [
+              GoRoute(
+                path: '/profile',
+                builder: (_, __) => const ProfileScreen(),
+              ),
+              GoRoute(
+                path: '/my-exams',
+                builder: (_, state) => MyExamsScreen(
+                  isOnboarding:
+                      state.uri.queryParameters['onboarding'] == '1',
+                ),
+              ),
+            ],
           ),
         ],
       ),

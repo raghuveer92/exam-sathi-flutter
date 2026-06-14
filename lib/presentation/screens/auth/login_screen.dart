@@ -10,10 +10,12 @@ import '../../../core/auth/google_auth_config.dart';
 import '../../../core/auth/google_auth_service.dart';
 import '../../../core/firebase/analytics_service.dart';
 import '../../../core/firebase/crashlytics_service.dart';
+import '../../../core/router/app_navigation.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/network/api_endpoints.dart';
+import '../../../core/testing/test_keys.dart';
 import '../../../core/utils/responsive_helper.dart';
 import '../../widgets/common/auth_or_divider.dart';
 import '../../widgets/common/google_sign_in_button.dart';
@@ -102,6 +104,12 @@ class _LoginScreenState extends State<LoginScreen> {
             AnalyticsService.logLogin();
             CrashlyticsService.setUser(userId: state.user.id.toString(), email: state.user.email);
           }
+          if (state is AuthRegistrationPending) {
+            AppNavigation.goIfDifferent(
+              context,
+              '/verify-email-otp?email=${Uri.encodeComponent(state.email)}&name=${Uri.encodeComponent(state.fullName)}',
+            );
+          }
           if (state is AuthError) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -147,6 +155,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   SizedBox(height: isWide ? 28 : 32),
                   AppTextField(
+                    fieldKey: TestKeys.loginEmail,
                     controller: _emailCtrl,
                     label: AppStrings.email,
                     hint: 'you@example.com',
@@ -162,6 +171,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 16),
                   AppTextField(
+                    fieldKey: TestKeys.loginPassword,
                     controller: _passwordCtrl,
                     label: AppStrings.password,
                     hint: '••••••••',
@@ -189,12 +199,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
-                      onPressed: () => context.go('/forgot-password'),
+                      onPressed: () => AppNavigation.goIfDifferent(context, '/forgot-password'),
                       child: const Text(AppStrings.forgotPassword),
                     ),
                   ),
                   const SizedBox(height: 16),
                   GradientButton(
+                    key: TestKeys.loginSubmit,
                     label: AppStrings.signIn,
                     isLoading: state is AuthLoading,
                     onPressed: _login,
@@ -217,7 +228,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       GestureDetector(
-                        onTap: () => context.go('/register'),
+                        key: TestKeys.signUpLink,
+                        onTap: () => AppNavigation.goIfDifferent(context, '/register'),
                         child: Text(
                           AppStrings.signUp,
                           style: const TextStyle(

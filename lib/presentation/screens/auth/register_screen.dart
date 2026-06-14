@@ -8,9 +8,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/auth/google_auth_config.dart';
 import '../../../core/auth/google_auth_service.dart';
+import '../../../core/router/app_navigation.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
+import '../../../core/testing/test_keys.dart';
 import '../../../core/utils/responsive_helper.dart';
 import '../../widgets/common/auth_or_divider.dart';
 import '../../widgets/common/google_sign_in_button.dart';
@@ -93,7 +95,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       body: BlocConsumer<AuthBloc, AuthState>(
         listener: (context, state) {
           if (state is AuthRegistrationPending) {
-            context.go(
+            AppNavigation.goIfDifferent(
+              context,
               '/verify-email-otp?email=${Uri.encodeComponent(state.email)}&name=${Uri.encodeComponent(state.fullName)}',
             );
           }
@@ -132,6 +135,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   SizedBox(height: isWide ? 24 : 32),
                     AppTextField(
+                      fieldKey: TestKeys.registerName,
                       controller: _nameCtrl,
                       label: AppStrings.fullName,
                       hint: 'Aarav Sharma',
@@ -141,6 +145,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     const SizedBox(height: 16),
                     AppTextField(
+                      fieldKey: TestKeys.registerEmail,
                       controller: _emailCtrl,
                       label: AppStrings.email,
                       hint: 'you@example.com',
@@ -156,6 +161,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     const SizedBox(height: 16),
                     AppTextField(
+                      fieldKey: TestKeys.registerPassword,
                       controller: _passwordCtrl,
                       label: AppStrings.password,
                       hint: 'Min 6 characters',
@@ -199,6 +205,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       const SizedBox(height: 20),
                     ],
                     GradientButton(
+                      key: TestKeys.registerSubmit,
                       label: 'Create Account',
                       isLoading: state is AuthLoading,
                       onPressed: _register,
@@ -212,7 +219,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                         GestureDetector(
-                          onTap: () => context.go('/login'),
+                          onTap: () => AppNavigation.goIfDifferent(context, '/login'),
                           child: const Text(
                             AppStrings.signIn,
                             style: TextStyle(

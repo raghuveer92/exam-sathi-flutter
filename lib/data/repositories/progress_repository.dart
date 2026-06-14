@@ -39,9 +39,139 @@ class ProgressRepository {
     int subjectId, {
     required int userExamId,
   }) async {
-    final data = _store.getJson(_store.subjectDetailKey(userExamId, subjectId));
-    if (data == null) return null;
-    return SubjectDetailModel.fromJson(data);
+    return tryReadSubjectDetailOffline(
+      subjectId: subjectId,
+      userExamId: userExamId,
+    );
+  }
+
+  /// Synchronous local read — cache first, then build from synced catalog.
+  SubjectDetailModel? tryReadSubjectDetailOffline({
+    required int subjectId,
+    required int userExamId,
+  }) {
+    final key = _store.subjectDetailKey(userExamId, subjectId);
+    final cached = _store.getJson(key);
+    if (cached != null) {
+      return SubjectDetailModel.fromJson(cached);
+    }
+
+    final built = _buildSubjectDetailMapFromCatalog(subjectId);
+    if (built == null) return null;
+
+    _applyTopicProgressTableToSubjectMap(built, userExamId, subjectId);
+    unawaited(_store.putJson(key, built));
+    return SubjectDetailModel.fromJson(built);
+  }
+
+  /// Count topics already cached (or buildable from catalog) for enrollment verification.
+  int countCachedTopics({
+    required int userExamId,
+    required Iterable<int> subjectIds,
+  }) {
+    var total = 0;
+    for (final subjectId in subjectIds) {
+      final detail = tryReadSubjectDetailOffline(
+        subjectId: subjectId,
+        userExamId: userExamId,
+      );
+      if (detail == null) continue;
+      for (final chapter in detail.chapters) {
+        total += chapter.topics.length;
+      }
+    }
+    return total;
+  }
+
+  /// True when this enrollment already has topic content in local cache.
+  bool enrollmentHasCachedTopics(int userExamId) {
+    final catalog = _store.getJson(LocalStore.syncCatalogMasterKey);
+    if (catalog == null) return false;
+
+    for (final raw in _resolveCachedEnrollments()) {
+      final id = (raw['id'] as num?)?.toInt();
+      if (id != userExamId) continue;
+      final examId = (raw['examId'] as num?)?.toInt();
+      if (examId == null) return false;
+      final subjectIds = _resolveSubjectIdsForExam(examId, catalog);
+      if (subjectIds.isEmpty) return false;
+      return countCachedTopics(
+            userExamId: userExamId,
+            subjectIds: subjectIds,
+          ) >
+          0;
+    }
+    return false;
+  }
+
+  /// True when synced catalog exists and at least one subject has cached topics.
+  bool hasOfflineStudyContent() {
+    final catalog = _store.getJson(LocalStore.syncCatalogMasterKey);
+    final catalogTopics = catalog?['topics'];
+    if (catalogTopics is! List || catalogTopics.isEmpty) return false;
+
+    final enrollments = _resolveCachedEnrollments();
+    if (enrollments.isEmpty) return false;
+
+    for (final raw in enrollments) {
+      final userExamId = (raw['id'] as num?)?.toInt();
+      final examId = (raw['examId'] as num?)?.toInt();
+      if (userExamId == null || examId == null) continue;
+
+      final subjectIds = _resolveSubjectIdsForExam(examId, catalog);
+      if (subjectIds.isEmpty) continue;
+      if (countCachedTopics(
+            userExamId: userExamId,
+            subjectIds: subjectIds,
+          ) >
+          0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  List<Map<String, dynamic>> _resolveCachedEnrollments() {
+    final fromKey = _store.getJsonList(LocalStore.myExamsKey);
+    if (fromKey != null && fromKey.isNotEmpty) {
+      return fromKey.whereType<Map<String, dynamic>>().toList();
+    }
+
+    final profile = _store.getJson(LocalStore.userProfileKey);
+    final profileExams = profile?['userExams'];
+    if (profileExams is List && profileExams.isNotEmpty) {
+      return profileExams.whereType<Map<String, dynamic>>().toList();
+    }
+
+    final dashboard = _store.getJson(LocalStore.dashboardKey);
+    final dashExams = dashboard?['myExams'];
+    if (dashExams is List && dashExams.isNotEmpty) {
+      return dashExams.whereType<Map<String, dynamic>>().toList();
+    }
+
+    return const [];
+  }
+
+  List<int> _resolveSubjectIdsForExam(
+    int examId,
+    Map<String, dynamic>? catalog,
+  ) {
+    final visible = _dashboardRepository.resolveVisibleSubjects(examId);
+    if (visible.isNotEmpty) {
+      return visible.map((subject) => subject.id).toList();
+    }
+
+    if (catalog == null) return const [];
+
+    final subjects = catalog['subjects'];
+    if (subjects is! List) return const [];
+
+    return subjects
+        .whereType<Map<String, dynamic>>()
+        .where((subject) => (subject['examId'] as num?)?.toInt() == examId)
+        .where((subject) => subject['isActive'] != false)
+        .map((subject) => (subject['id'] as num).toInt())
+        .toList();
   }
 
   /// Local-first read — never hits network during normal usage.
@@ -340,6 +470,23 @@ class ProgressRepository {
   }
 
   /// Queue-only write — synced when user taps SYNC.
+  Future<void> enqueueBulkTopicProgress({
+    required int userExamId,
+    required List<Map<String, dynamic>> topics,
+  }) async {
+    if (topics.isEmpty) return;
+    await _offlineQueue.enqueue(
+      entityType: 'TOPIC',
+      entityId: 'bulk-$userExamId-${_uuid.v4()}',
+      action: 'BULK_TOPIC_PROGRESS',
+      payload: {
+        'userExamId': userExamId,
+        'topics': topics,
+      },
+    );
+  }
+
+  /// Queue-only write — synced when user taps SYNC.
   Future<void> enqueueTopicCompletion({
     required int userExamId,
     required int topicId,
@@ -396,6 +543,7 @@ class ProgressRepository {
         ? (totalStudyHours / count * 10).floor() / 10.0
         : 0.0;
     var assigned = 0.0;
+    final bulkUpdates = <Map<String, dynamic>>[];
 
     for (var i = 0; i < count; i++) {
       final topic = topics[i];
@@ -410,20 +558,32 @@ class ProgressRepository {
         assigned += share;
       }
 
+      final actualHours = topic.actualHours + share;
       await _persistLocally(
         userExamId: userExamId,
         subjectId: subjectId,
         topicId: topic.id,
         wasCompleted: wasCompleted,
         isCompleted: true,
-        actualHours: topic.actualHours + share,
+        actualHours: actualHours,
         studyHoursDelta: share > 0 ? share : null,
         studyDate: date,
         recordDailyLog: false,
-        enqueueHoursSync: share > 0,
+        enqueueCompletionSync: false,
+        enqueueHoursSync: false,
         rebuildProgress: false,
       );
+      bulkUpdates.add({
+        'topicId': topic.id,
+        'isCompleted': true,
+        'actualHours': actualHours,
+      });
     }
+
+    await enqueueBulkTopicProgress(
+      userExamId: userExamId,
+      topics: bulkUpdates,
+    );
 
     if (newlyCompleted > 0 || totalStudyHours > 0) {
       await _writeDailyStudyLogRecord(
@@ -452,6 +612,7 @@ class ProgressRepository {
   }) async {
     final date = studyDate ?? _localTodayDate();
     var newlyCompleted = 0;
+    final bulkUpdates = <Map<String, dynamic>>[];
 
     for (final topic in topics) {
       if (topic.isCompleted) continue;
@@ -466,7 +627,21 @@ class ProgressRepository {
         studyHoursDelta: null,
         studyDate: date,
         recordDailyLog: false,
+        enqueueCompletionSync: false,
+        enqueueHoursSync: false,
         rebuildProgress: false,
+      );
+      bulkUpdates.add({
+        'topicId': topic.id,
+        'isCompleted': true,
+        'actualHours': topic.actualHours,
+      });
+    }
+
+    if (bulkUpdates.isNotEmpty) {
+      await enqueueBulkTopicProgress(
+        userExamId: userExamId,
+        topics: bulkUpdates,
       );
     }
 
@@ -502,6 +677,7 @@ class ProgressRepository {
     final count = topics.length;
     final baseShare = (totalHours / count * 10).floor() / 10.0;
     var assigned = 0.0;
+    final bulkUpdates = <Map<String, dynamic>>[];
 
     for (var i = 0; i < count; i++) {
       final topic = topics[i];
@@ -521,10 +697,21 @@ class ProgressRepository {
         studyHoursDelta: share,
         studyDate: date,
         recordDailyLog: false,
-        enqueueHoursSync: true,
+        enqueueCompletionSync: false,
+        enqueueHoursSync: false,
         rebuildProgress: false,
       );
+      bulkUpdates.add({
+        'topicId': topic.id,
+        'isCompleted': topic.isCompleted,
+        'actualHours': newHours,
+      });
     }
+
+    await enqueueBulkTopicProgress(
+      userExamId: userExamId,
+      topics: bulkUpdates,
+    );
 
     await _writeDailyStudyLogRecord(
       studyDate: date,
@@ -568,6 +755,12 @@ class ProgressRepository {
 
   /// Upload one queued topic-progress row (uses direct API — batch /sync/push 500s on prod).
   Future<void> flushQueuedTopicProgress(Map<String, dynamic> item) async {
+    final action = item['action'] as String?;
+    if (action == 'BULK_TOPIC_PROGRESS') {
+      await flushQueuedBulkTopicProgress(item);
+      return;
+    }
+
     final payload = item['payload'];
     if (payload is! Map<String, dynamic>) {
       await _offlineQueue.removeByClientId(item['clientId'] as String);
@@ -581,7 +774,7 @@ class ProgressRepository {
     }
 
     if (userExamId != null) {
-      await _dashboardRepository.setActiveMyExam(userExamId);
+      await _dashboardRepository.ensureActiveMyExamForSync(userExamId);
     }
 
     try {
@@ -605,6 +798,66 @@ class ProgressRepository {
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) {
         await _offlineQueue.removeByClientId(item['clientId'] as String);
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  /// Upload one bulk topic-progress queue row (single API call for many topics).
+  Future<void> flushQueuedBulkTopicProgress(Map<String, dynamic> item) async {
+    final payload = item['payload'];
+    if (payload is! Map<String, dynamic>) {
+      await _offlineQueue.removeByClientId(item['clientId'] as String);
+      return;
+    }
+
+    final userExamId = (payload['userExamId'] as num?)?.toInt();
+    final topics = payload['topics'];
+    final clientId = item['clientId'] as String?;
+    if (userExamId == null || topics is! List || topics.isEmpty || clientId == null) {
+      if (clientId != null) {
+        await _offlineQueue.removeByClientId(clientId);
+      }
+      return;
+    }
+
+    try {
+      ApiCallTracker.instance.record('POST ${ApiEndpoints.bulkUpdateProgress}');
+      final response = await _client.dio.post(
+        ApiEndpoints.bulkUpdateProgress,
+        data: {
+          'userExamId': userExamId,
+          'topics': topics,
+        },
+      );
+
+      final data = response.data['data'];
+      if (data is Map<String, dynamic>) {
+        final subjectProgress = data['subjectProgress'];
+        final userExam =
+            await _dashboardRepository.resolveUserExamById(userExamId);
+        if (userExam != null && subjectProgress is List) {
+          await _dashboardRepository.cacheSubjectProgressList(
+            userExam.examId,
+            subjectProgress,
+          );
+        }
+      }
+
+      for (final raw in topics) {
+        if (raw is! Map<String, dynamic>) continue;
+        final topicId = (raw['topicId'] as num?)?.toInt();
+        if (topicId == null) continue;
+        await markTopicProgressSynced(
+          topicId: topicId,
+          userExamId: userExamId,
+        );
+      }
+      await _offlineQueue.removeByClientId(clientId);
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        await _offlineQueue.removeByClientId(clientId);
         return;
       }
       rethrow;

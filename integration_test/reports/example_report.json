@@ -1,0 +1,61 @@
+{
+  "suite": "ExamSaathi Full Suite",
+  "startedAt": "2026-06-13T10:00:00.000Z",
+  "finishedAt": "2026-06-13T10:05:42.000Z",
+  "durationMs": 342000,
+  "passedSteps": 18,
+  "failedSteps": 0,
+  "steps": [
+    {
+      "name": "Navigate to Sign Up",
+      "success": true,
+      "timestamp": "2026-06-13T10:00:05.000Z"
+    },
+    {
+      "name": "Fill registration form",
+      "success": true,
+      "timestamp": "2026-06-13T10:00:08.000Z"
+    },
+    {
+      "name": "Submit registration",
+      "success": true,
+      "timestamp": "2026-06-13T10:00:12.000Z"
+    },
+    {
+      "name": "Verify OTP screen appears",
+      "success": true,
+      "timestamp": "2026-06-13T10:00:14.000Z"
+    },
+    {
+      "name": "Enter dev OTP and verify",
+      "success": true,
+      "timestamp": "2026-06-13T10:00:20.000Z",
+      "detail": "OTP=999999"
+    },
+    {
+      "name": "Select first available exam",
+      "success": true,
+      "timestamp": "2026-06-13T10:01:30.000Z"
+    },
+    {
+      "name": "Wait for offline sync/download",
+      "success": true,
+      "timestamp": "2026-06-13T10:03:00.000Z"
+    },
+    {
+      "name": "Mark topic complete",
+      "success": true,
+      "timestamp": "2026-06-13T10:04:10.000Z"
+    },
+    {
+      "name": "Logout from profile",
+      "success": true,
+      "timestamp": "2026-06-13T10:04:45.000Z"
+    },
+    {
+      "name": "Delete account",
+      "success": true,
+      "timestamp": "2026-06-13T10:05:30.000Z"
+    }
+  ]
+}

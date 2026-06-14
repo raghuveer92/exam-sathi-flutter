@@ -294,6 +294,7 @@ class OfflineQueueService {
     final type = item['type'] as String? ?? action;
     return action == 'COMPLETE_TOPIC' ||
         action == 'ADD_STUDY_HOURS' ||
+        action == 'BULK_TOPIC_PROGRESS' ||
         type == 'TOPIC_PROGRESS';
   }
 

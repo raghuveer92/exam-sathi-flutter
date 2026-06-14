@@ -73,12 +73,21 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
     ));
   }
 
-  /// Local cache only — no automatic network/sync.
+  /// Local cache only — show cached dashboard immediately on reload.
   Future<void> _onLoadRequested(
     DashboardLoadRequested event,
     Emitter<DashboardState> emit,
   ) async {
-    emit(DashboardLoading());
+    final cached = await _repository.getDashboardCached();
+    if (cached != null) {
+      emit(DashboardLoaded(
+        dashboard: cached,
+        calculatedDailyTarget: _calcDailyTarget(cached),
+      ));
+    } else {
+      emit(DashboardLoading());
+    }
+
     try {
       await _progressRebuildService.rebuildAll();
       final dashboard = await _repository.getDashboard(forceRemote: false);
@@ -87,7 +96,9 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
         calculatedDailyTarget: _calcDailyTarget(dashboard),
       ));
     } catch (e) {
-      emit(DashboardError(message: e.toString()));
+      if (cached == null) {
+        emit(DashboardError(message: e.toString()));
+      }
     }
   }
 

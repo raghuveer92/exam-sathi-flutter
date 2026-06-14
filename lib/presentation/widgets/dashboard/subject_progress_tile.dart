@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/router/app_navigation.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../data/models/subject_progress_model.dart';
 
@@ -15,7 +16,10 @@ class SubjectProgressTile extends StatelessWidget {
     final percent = progress.completionPercent / 100;
 
     return GestureDetector(
-      onTap: () => context.go('/subjects/${progress.subjectId}'),
+      onTap: () => AppNavigation.goIfDifferent(
+        context,
+        '/subjects/${progress.subjectId}',
+      ),
       child: Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(

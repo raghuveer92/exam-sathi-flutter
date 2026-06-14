@@ -3,9 +3,12 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:logger/logger.dart';
 
+import '../local/api_call_tracker.dart';
 import '../local/local_store.dart';
 import '../network/connectivity_helper.dart';
 import '../../data/models/subject_progress_model.dart';
+import '../../data/models/subject_model.dart';
+import '../../data/models/user_exam_model.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../core/sync/progress_rebuild_service.dart';
 import '../../data/repositories/dashboard_repository.dart';
@@ -138,13 +141,38 @@ class SyncService {
   }
 
   void _emit(SyncStep step, void Function(SyncProgress) onProgress,
-      {int current = 0, int total = 0, String? detail}) {
+      {int current = 0, int total = 0, String? detail, List<SyncProgressItem>? steps}) {
     onProgress(SyncProgress(
       step: step,
       current: current,
       total: total,
       detail: detail,
+      steps: steps,
     ));
+  }
+
+  void _emitStepProgress(
+    void Function(SyncProgress) onProgress,
+    List<SyncProgressItem> template,
+    String stepId, {
+    SyncStep step = SyncStep.preparing,
+    String? detail,
+    bool complete = false,
+  }) {
+    final progress = complete
+        ? SyncProgress.withCompletedSteps(
+            template: template,
+            throughId: stepId,
+            step: step,
+            detail: detail,
+          )
+        : SyncProgress.withActiveStep(
+            template: template,
+            activeId: stepId,
+            step: step,
+            detail: detail,
+          );
+    onProgress(progress);
   }
 
   /// First-time full download after login/signup.
@@ -174,51 +202,398 @@ class SyncService {
     if (!await isOnline()) {
       throw StateError('Internet required to download exam content.');
     }
-    _emit(SyncStep.preparing, onProgress);
 
-    final incremental = lastSyncTime != null;
-    await syncBundle(incremental: incremental);
-    final catalog = await syncCatalog(incremental: incremental);
+    if (_activeSync != null) {
+      await _activeSync!.future;
+    }
+    final completer = Completer<void>();
+    _activeSync = completer;
 
-    final exams = await _dashboardRepository.resolveMyExamsFromCache();
-    final targets = userExamId != null
+    ApiCallTracker.instance.reset();
+    final totalSw = Stopwatch()..start();
+    _logger.i(
+      '[Download] ===== enrollment download started '
+      '(userExamId=$userExamId) =====',
+    );
+
+    try {
+      var stepItems = SyncProgress.enrollmentTemplate();
+      _emitStepProgress(
+        onProgress,
+        stepItems,
+        'enrollments',
+        step: SyncStep.preparing,
+      );
+      stepItems = SyncProgress.withActiveStep(
+        template: stepItems,
+        activeId: 'enrollments',
+        step: SyncStep.preparing,
+      ).steps!;
+
+      final targets = await _timedDownloadStep(
+        'resolve enrollment targets',
+        () => _resolveEnrollmentDownloadTargets(userExamId),
+      );
+      if (targets.isEmpty) {
+        throw StateError(
+          'Topics could not be downloaded. Check your subject selections and try again.',
+        );
+      }
+      _emitStepProgress(
+        onProgress,
+        stepItems,
+        'enrollments',
+        step: SyncStep.preparing,
+        detail: targets.map((e) => e.examName).join(', '),
+        complete: true,
+      );
+      stepItems = SyncProgress.withCompletedSteps(
+        template: stepItems,
+        throughId: 'enrollments',
+        detail: targets.map((e) => e.examName).join(', '),
+      ).steps!;
+      _logger.i(
+        '[Download] targets: ${targets.map((e) => 'userExam=${e.id}/exam=${e.examId}').join(', ')}',
+      );
+
+      final examIds = targets.map((e) => e.examId).toSet().toList();
+
+      _emitStepProgress(
+        onProgress,
+        stepItems,
+        'bundle',
+        step: SyncStep.bundle,
+        detail: 'Profile, exams & progress',
+      );
+      stepItems = SyncProgress.withActiveStep(
+        template: stepItems,
+        activeId: 'bundle',
+        step: SyncStep.bundle,
+        detail: 'Profile, exams & progress',
+      ).steps!;
+      await _timedDownloadStep(
+        'GET /sync/bundle (full)',
+        () => syncBundle(incremental: false),
+      );
+      _emitStepProgress(
+        onProgress,
+        stepItems,
+        'bundle',
+        step: SyncStep.bundle,
+        complete: true,
+      );
+      stepItems = SyncProgress.withCompletedSteps(
+        template: stepItems,
+        throughId: 'bundle',
+      ).steps!;
+
+      _emitStepProgress(
+        onProgress,
+        stepItems,
+        'catalog',
+        step: SyncStep.catalog,
+        detail: '${examIds.length} exam(s)',
+      );
+      stepItems = SyncProgress.withActiveStep(
+        template: stepItems,
+        activeId: 'catalog',
+        step: SyncStep.catalog,
+        detail: '${examIds.length} exam(s)',
+      ).steps!;
+      final catalog = await _timedDownloadStep(
+        'GET /sync/catalog?examIds=$examIds',
+        () => syncCatalog(incremental: false, examIds: examIds),
+      );
+      final catalogSubjects = catalog.affectedSubjectIds.length;
+      _emitStepProgress(
+        onProgress,
+        stepItems,
+        'catalog',
+        step: SyncStep.catalog,
+        detail: '$catalogSubjects subject(s) in catalog',
+        complete: true,
+      );
+      stepItems = SyncProgress.withCompletedSteps(
+        template: stepItems,
+        throughId: 'catalog',
+        detail: '$catalogSubjects subject(s) in catalog',
+      ).steps!;
+
+      var totalSubjects = 0;
+      var totalTopics = 0;
+
+      _emitStepProgress(
+        onProgress,
+        stepItems,
+        'syllabus',
+        step: SyncStep.materializing,
+        detail: 'Preparing ${targets.length} exam(s)',
+      );
+      stepItems = SyncProgress.withActiveStep(
+        template: stepItems,
+        activeId: 'syllabus',
+        step: SyncStep.materializing,
+        detail: 'Preparing ${targets.length} exam(s)',
+      ).steps!;
+
+      for (final exam in targets) {
+        _emitStepProgress(
+          onProgress,
+          stepItems,
+          'syllabus',
+          step: SyncStep.materializing,
+          detail: '${exam.examName} — loading subjects',
+        );
+        stepItems = SyncProgress.withActiveStep(
+          template: stepItems,
+          activeId: 'syllabus',
+          step: SyncStep.materializing,
+          detail: '${exam.examName} — loading subjects',
+        ).steps!;
+
+        final subjects = await _timedDownloadStep(
+          'resolve subjects (examId=${exam.examId})',
+          () => _resolveSubjectsForEnrollment(exam.examId),
+        );
+        if (subjects.isEmpty) {
+          _logger.w(
+            'Enrollment download: no subjects resolved for exam ${exam.examId} '
+            '(userExam ${exam.id})',
+          );
+          continue;
+        }
+
+        final subjectIds = subjects.map((s) => s.id).toList();
+        await _timedDownloadStep(
+          'materialize catalog locally (${subjectIds.length} subjects, userExam=${exam.id})',
+          () => _progressRepository.materializeSubjectDetailsFromCatalog(
+            userExamId: exam.id,
+            subjectIds: subjectIds,
+          ),
+        );
+
+        final touched = catalog.affectedSubjectIds
+            .where((id) => subjectIds.contains(id))
+            .toList();
+        if (touched.isNotEmpty) {
+          await _timedDownloadStep(
+            'refresh subject caches from catalog (${touched.length} subjects)',
+            () => _progressRepository.refreshSubjectDetailsFromCatalog(
+              userExamId: exam.id,
+              subjectIds: touched,
+            ),
+          );
+        }
+
+        totalSubjects += subjects.length;
+        var topicCount = _progressRepository.countCachedTopics(
+          userExamId: exam.id,
+          subjectIds: subjectIds,
+        );
+        if (topicCount == 0 && subjects.isNotEmpty) {
+          _logger.w(
+            '[Download] catalog materialization yielded 0 topics — '
+            'fetching ${subjects.length} subject(s) via GET /progress/subject/{id}',
+          );
+          for (final subject in subjects) {
+            await _timedDownloadStep(
+              'GET /progress/subject/${subject.id} (userExam=${exam.id})',
+              () => _progressRepository.getSubjectDetail(
+                subject.id,
+                userExamId: exam.id,
+                forceRemote: true,
+              ),
+            );
+          }
+          topicCount = _progressRepository.countCachedTopics(
+            userExamId: exam.id,
+            subjectIds: subjectIds,
+          );
+        }
+        totalTopics += topicCount;
+        _emitStepProgress(
+          onProgress,
+          stepItems,
+          'syllabus',
+          step: SyncStep.materializing,
+          detail:
+              '${exam.examName} — ${subjects.length} subjects, $topicCount topics',
+        );
+        stepItems = SyncProgress.withActiveStep(
+          template: stepItems,
+          activeId: 'syllabus',
+          step: SyncStep.materializing,
+          detail:
+              '${exam.examName} — ${subjects.length} subjects, $topicCount topics',
+        ).steps!;
+        _logger.i(
+          'Enrollment download: exam ${exam.examName} (userExam ${exam.id}) — '
+          '${subjects.length} subjects, $topicCount topics cached',
+        );
+      }
+
+      if (totalSubjects == 0 || totalTopics == 0) {
+        throw StateError(
+          'Topics could not be downloaded. Check your subject selections and try again.',
+        );
+      }
+
+      _emitStepProgress(
+        onProgress,
+        stepItems,
+        'syllabus',
+        step: SyncStep.materializing,
+        detail: '$totalSubjects subjects, $totalTopics topics saved',
+        complete: true,
+      );
+      stepItems = SyncProgress.withCompletedSteps(
+        template: stepItems,
+        throughId: 'syllabus',
+        detail: '$totalSubjects subjects, $totalTopics topics saved',
+      ).steps!;
+
+      _emitStepProgress(
+        onProgress,
+        stepItems,
+        'progress',
+        step: SyncStep.progress,
+        detail: 'Updating topic completion',
+      );
+      stepItems = SyncProgress.withActiveStep(
+        template: stepItems,
+        activeId: 'progress',
+        step: SyncStep.progress,
+        detail: 'Updating topic completion',
+      ).steps!;
+      await _timedDownloadStep(
+        'apply topic progress rows',
+        () => _progressRepository.applyTopicProgressForEnrollments(
+          targets.map((e) => e.id).toSet(),
+        ),
+      );
+      _emitStepProgress(
+        onProgress,
+        stepItems,
+        'progress',
+        step: SyncStep.progress,
+        complete: true,
+      );
+      stepItems = SyncProgress.withCompletedSteps(
+        template: stepItems,
+        throughId: 'progress',
+      ).steps!;
+
+      _emitStepProgress(
+        onProgress,
+        stepItems,
+        'finalize',
+        step: SyncStep.finalizing,
+        detail: 'Building study views',
+      );
+      stepItems = SyncProgress.withActiveStep(
+        template: stepItems,
+        activeId: 'finalize',
+        step: SyncStep.finalizing,
+        detail: 'Building study views',
+      ).steps!;
+      await _timedDownloadStep(
+        'rebuild progress views',
+        () => _progressRebuildService.rebuildExams(
+          targets.map((e) => e.examId),
+        ),
+      );
+      if (catalog.serverTime != null) {
+        await _persistLastSyncTime(catalog.serverTime ?? _lastBundleServerTime);
+      }
+      _emitStepProgress(
+        onProgress,
+        stepItems,
+        'finalize',
+        step: SyncStep.complete,
+        detail: 'Ready for offline study',
+        complete: true,
+      );
+      _logger.i(
+        'Enrollment download complete — $totalSubjects subjects, $totalTopics topics',
+      );
+      _emit(
+        SyncStep.complete,
+        onProgress,
+        detail: '$totalSubjects subjects, $totalTopics topics',
+        steps: SyncProgress.withCompletedSteps(
+          template: stepItems,
+          throughId: 'finalize',
+          step: SyncStep.complete,
+          detail: 'Ready for offline study',
+        ).steps,
+      );
+    } finally {
+      totalSw.stop();
+      _logger.i(
+        '[Download] ===== enrollment download finished in '
+        '${totalSw.elapsedMilliseconds}ms =====',
+      );
+      ApiCallTracker.instance.logSummary(_logger);
+      completer.complete();
+      if (identical(_activeSync, completer)) {
+        _activeSync = null;
+      }
+    }
+  }
+
+  Future<List<UserExamModel>> _resolveEnrollmentDownloadTargets(int? userExamId) async {
+    var exams = await _dashboardRepository.resolveMyExamsFromCache();
+    if (exams.isEmpty) {
+      exams = await _dashboardRepository.getMyExams(forceRemote: true);
+    }
+
+    Iterable<UserExamModel> targets = userExamId != null
         ? exams.where((e) => e.id == userExamId)
         : exams.where((e) => e.isActive);
 
-    for (final exam in targets) {
-      final subjects = await _dashboardRepository.getVisibleSubjectsByExam(
-        exam.examId,
-        forceRemote: false,
-      );
-      if (subjects.isEmpty) continue;
-
-      final subjectIds = subjects.map((s) => s.id).toList();
-      await _progressRepository.materializeSubjectDetailsFromCatalog(
-        userExamId: exam.id,
-        subjectIds: subjectIds,
-      );
-
-      final touched = catalog.affectedSubjectIds
-          .where((id) => subjectIds.contains(id))
-          .toList();
-      if (touched.isNotEmpty) {
-        await _progressRepository.refreshSubjectDetailsFromCatalog(
-          userExamId: exam.id,
-          subjectIds: touched,
-        );
+    if (targets.isEmpty && userExamId != null) {
+      final profile = _store.getJson(LocalStore.userProfileKey);
+      final rawExams = profile?['userExams'];
+      if (rawExams is List) {
+        for (final raw in rawExams) {
+          if (raw is! Map<String, dynamic>) continue;
+          if ((raw['id'] as num?)?.toInt() == userExamId) {
+            return [UserExamModel.fromJson(raw)];
+          }
+        }
+      }
+      final activeId = (profile?['activeUserExamId'] as num?)?.toInt();
+      if (activeId == userExamId) {
+        final selectedExamId = (profile?['selectedExamId'] as num?)?.toInt();
+        if (selectedExamId != null) {
+          return [
+            UserExamModel(
+              id: userExamId,
+              examId: selectedExamId,
+              examName: profile?['selectedExamName'] as String? ?? 'Exam',
+              isActive: true,
+            ),
+          ];
+        }
       }
     }
 
-    await _progressRepository.applyTopicProgressForEnrollments(
-      targets.map((e) => e.id).toSet(),
-    );
-    await _progressRebuildService.rebuildExams(
-      targets.map((e) => e.examId),
-    );
-    if (catalog.serverTime != null || incremental) {
-      await _persistLastSyncTime(catalog.serverTime ?? _lastBundleServerTime);
+    if (targets.isEmpty) {
+      targets = exams.where((e) => e.isActive);
     }
-    _emit(SyncStep.complete, onProgress);
+    if (targets.isEmpty && exams.isNotEmpty) {
+      targets = [exams.first];
+    }
+    return targets.toList(growable: false);
+  }
+
+  /// Visible subjects for a new enrollment — always fetch from server so optional
+  /// selections saved during enroll are reflected before catalog materialization.
+  Future<List<SubjectModel>> _resolveSubjectsForEnrollment(int examId) async {
+    return _dashboardRepository.resolveSubjectsForExam(
+      examId,
+      forceRemote: true,
+    );
   }
 
   /// Wipes sync cursor and performs a complete re-download (profile action).
@@ -297,6 +672,7 @@ class SyncService {
 
     await _offlineQueue.resetStuckSyncingItems();
     await _coalesceSupersededTopicProgressItems();
+    await _coalesceTopicProgressToBulk();
     await _coalescePendingStudyLogs();
 
     for (final item
@@ -316,6 +692,7 @@ class SyncService {
           await _dashboardRepository.flushQueuedExamDate(item);
         } else if (action == 'COMPLETE_TOPIC' ||
             action == 'ADD_STUDY_HOURS' ||
+            action == 'BULK_TOPIC_PROGRESS' ||
             type == 'TOPIC_PROGRESS') {
           await _progressRepository.flushQueuedTopicProgress(item);
         } else if (action == 'LOG_STUDY_HOURS' || type == 'LOG_STUDY') {
@@ -381,7 +758,80 @@ class SyncService {
     final type = item['type'] as String? ?? action;
     return action == 'COMPLETE_TOPIC' ||
         action == 'ADD_STUDY_HOURS' ||
+        action == 'BULK_TOPIC_PROGRESS' ||
         type == 'TOPIC_PROGRESS';
+  }
+
+  /// Merge pending per-topic rows into one bulk upload per enrollment.
+  Future<void> _coalesceTopicProgressToBulk() async {
+    final pending = List<Map<String, dynamic>>.from(_offlineQueue.processableItems);
+    final mergedByExam = <int, Map<int, _TopicProgressMerge>>{};
+    final topicItemClientIds = <String>[];
+
+    for (final item in pending) {
+      if (!_isTopicProgressItem(item)) continue;
+      final clientId = item['clientId'] as String?;
+      if (clientId != null) topicItemClientIds.add(clientId);
+
+      final payload = item['payload'];
+      if (payload is! Map<String, dynamic>) continue;
+      final userExamId = (payload['userExamId'] as num?)?.toInt();
+      if (userExamId == null) continue;
+
+      final action = item['action'] as String?;
+      if (action == 'BULK_TOPIC_PROGRESS') {
+        final topics = payload['topics'];
+        if (topics is! List) continue;
+        for (final raw in topics) {
+          if (raw is! Map<String, dynamic>) continue;
+          _mergeTopicProgressPayload(mergedByExam, userExamId, raw);
+        }
+        continue;
+      }
+
+      _mergeTopicProgressPayload(mergedByExam, userExamId, payload);
+    }
+
+    if (mergedByExam.isEmpty || topicItemClientIds.length <= 1) return;
+
+    var shouldReplace = false;
+    for (final topics in mergedByExam.values) {
+      if (topics.length >= 2) {
+        shouldReplace = true;
+        break;
+      }
+    }
+    if (!shouldReplace) return;
+
+    for (final clientId in topicItemClientIds) {
+      await _offlineQueue.removeByClientId(clientId);
+    }
+
+    for (final entry in mergedByExam.entries) {
+      final topics = entry.value.entries
+          .map((e) => e.value.toPayload(e.key))
+          .toList(growable: false);
+      await _progressRepository.enqueueBulkTopicProgress(
+        userExamId: entry.key,
+        topics: topics,
+      );
+    }
+  }
+
+  void _mergeTopicProgressPayload(
+    Map<int, Map<int, _TopicProgressMerge>> mergedByExam,
+    int userExamId,
+    Map<String, dynamic> payload,
+  ) {
+    final topicId = (payload['topicId'] as num?)?.toInt();
+    if (topicId == null) return;
+
+    final byTopic = mergedByExam.putIfAbsent(userExamId, () => {});
+    final merge = byTopic.putIfAbsent(topicId, _TopicProgressMerge.new);
+    merge.apply(
+      isCompleted: payload['isCompleted'] as bool? ?? false,
+      actualHours: (payload['actualHours'] as num?)?.toDouble() ?? 0.0,
+    );
   }
 
   bool _isStudyLogItem(Map<String, dynamic> item) {
@@ -497,21 +947,66 @@ class SyncService {
   Future<void> _downloadFull({
     required void Function(SyncProgress progress) onProgress,
   }) async {
-    _emit(SyncStep.preparing, onProgress);
+    ApiCallTracker.instance.reset();
+    final totalSw = Stopwatch()..start();
+    _logger.i('[Download] ===== full download started =====');
+
+    var stepItems = SyncProgress.fullDownloadTemplate();
+    _emitStepProgress(onProgress, stepItems, 'profile', step: SyncStep.userData);
+    stepItems = SyncProgress.withActiveStep(
+      template: stepItems,
+      activeId: 'profile',
+      step: SyncStep.userData,
+    ).steps!;
     final stats = SyncDownloadStats();
 
-    _emit(SyncStep.userData, onProgress);
     try {
       await _authRepository.getMe();
     } catch (e, st) {
       _logger.w('Profile refresh skipped before sync', error: e, stackTrace: st);
     }
+    _emitStepProgress(
+      onProgress,
+      stepItems,
+      'profile',
+      step: SyncStep.userData,
+      complete: true,
+    );
+    stepItems = SyncProgress.withCompletedSteps(
+      template: stepItems,
+      throughId: 'profile',
+    ).steps!;
+
+    _emitStepProgress(
+      onProgress,
+      stepItems,
+      'bundle',
+      step: SyncStep.bundle,
+      detail: 'Exams, dashboard & progress',
+    );
+    stepItems = SyncProgress.withActiveStep(
+      template: stepItems,
+      activeId: 'bundle',
+      step: SyncStep.bundle,
+      detail: 'Exams, dashboard & progress',
+    ).steps!;
     try {
       stats.studyProgressRows = await syncBundle(incremental: false);
     } catch (e, st) {
       _logger.w('Bundle sync failed, using legacy APIs', error: e, stackTrace: st);
       await syncLegacyFallback();
     }
+    _emitStepProgress(
+      onProgress,
+      stepItems,
+      'bundle',
+      step: SyncStep.bundle,
+      complete: true,
+    );
+    stepItems = SyncProgress.withCompletedSteps(
+      template: stepItems,
+      throughId: 'bundle',
+    ).steps!;
 
     final exams = await _dashboardRepository.resolveMyExamsFromCache();
     stats.exams = exams.length;
@@ -525,7 +1020,19 @@ class SyncService {
     if (subjectCount == 0) subjectCount = 1;
 
     var subjectIndex = 0;
-    _emit(SyncStep.subjects, onProgress, current: 0, total: subjectCount);
+    _emitStepProgress(
+      onProgress,
+      stepItems,
+      'subjects',
+      step: SyncStep.subjects,
+      detail: subjectCount > 0 ? '0 / $subjectCount subjects' : null,
+    );
+    stepItems = SyncProgress.withActiveStep(
+      template: stepItems,
+      activeId: 'subjects',
+      step: SyncStep.subjects,
+      detail: subjectCount > 0 ? '0 / $subjectCount subjects' : null,
+    ).steps!;
 
     for (final exam in exams) {
       if (!exam.isActive) {
@@ -550,13 +1057,21 @@ class SyncService {
       );
       for (final subject in subjects) {
         subjectIndex++;
-        _emit(
-          SyncStep.chapters,
+        final subjectDetail =
+            '$subjectIndex / $subjectCount — ${subject.name}';
+        _emitStepProgress(
           onProgress,
-          current: subjectIndex,
-          total: subjectCount,
-          detail: subject.name,
+          stepItems,
+          'subjects',
+          step: SyncStep.chapters,
+          detail: subjectDetail,
         );
+        stepItems = SyncProgress.withActiveStep(
+          template: stepItems,
+          activeId: 'subjects',
+          step: SyncStep.chapters,
+          detail: subjectDetail,
+        ).steps!;
         try {
           final detail = await _progressRepository.getSubjectDetail(
             subject.id,
@@ -573,9 +1088,43 @@ class SyncService {
       }
     }
 
-    _emit(SyncStep.topics, onProgress, current: subjectCount, total: subjectCount);
+    _emitStepProgress(
+      onProgress,
+      stepItems,
+      'subjects',
+      step: SyncStep.topics,
+      detail: '${stats.subjects} subjects, ${stats.topics} topics',
+      complete: true,
+    );
+    stepItems = SyncProgress.withCompletedSteps(
+      template: stepItems,
+      throughId: 'subjects',
+      detail: '${stats.subjects} subjects, ${stats.topics} topics',
+    ).steps!;
 
+    _emitStepProgress(
+      onProgress,
+      stepItems,
+      'catalog',
+      step: SyncStep.catalog,
+    );
+    stepItems = SyncProgress.withActiveStep(
+      template: stepItems,
+      activeId: 'catalog',
+      step: SyncStep.catalog,
+    ).steps!;
     await syncCatalog(incremental: false);
+    _emitStepProgress(
+      onProgress,
+      stepItems,
+      'catalog',
+      step: SyncStep.catalog,
+      complete: true,
+    );
+    stepItems = SyncProgress.withCompletedSteps(
+      template: stepItems,
+      throughId: 'catalog',
+    ).steps!;
 
     await _progressRepository.applyTopicProgressTableToSubjectDetails();
     stats.dailyStudyLogs =
@@ -583,42 +1132,112 @@ class SyncService {
 
     await _mockTestRepository.clearOfflineCache();
     final mockTestTopicIds = _resolveMockTestTopicIds();
-    _emit(
-      SyncStep.mockTests,
-      onProgress,
-      current: 0,
-      total: mockTestTopicIds.length,
-    );
-
-    var topicIndex = 0;
-    for (final topicId in mockTestTopicIds) {
-      topicIndex++;
+    if (mockTestTopicIds.isEmpty) {
+      stepItems = stepItems
+          .map((item) => item.id == 'mocktests'
+              ? item.copyWith(
+                  status: SyncProgressItemStatus.done,
+                  detail: 'No mock tests to download',
+                )
+              : item)
+          .toList(growable: false);
       _emit(
         SyncStep.mockTests,
         onProgress,
-        current: topicIndex,
-        total: mockTestTopicIds.length,
-        detail: 'Topic $topicId',
+        detail: 'No mock tests to download',
+        steps: stepItems,
       );
-      try {
-        final questionCount =
-            await _mockTestRepository.syncTopicForOffline(topicId);
-        if (questionCount > 0) {
-          stats.mockTests++;
-          stats.questions += questionCount;
+    } else {
+      _emitStepProgress(
+        onProgress,
+        stepItems,
+        'mocktests',
+        step: SyncStep.mockTests,
+        detail: '0 / ${mockTestTopicIds.length} topics',
+      );
+      stepItems = SyncProgress.withActiveStep(
+        template: stepItems,
+        activeId: 'mocktests',
+        step: SyncStep.mockTests,
+        detail: '0 / ${mockTestTopicIds.length} topics',
+      ).steps!;
+
+      var topicIndex = 0;
+      for (final topicId in mockTestTopicIds) {
+        topicIndex++;
+        final mockDetail = '$topicIndex / ${mockTestTopicIds.length} topics';
+        _emitStepProgress(
+          onProgress,
+          stepItems,
+          'mocktests',
+          step: SyncStep.mockTests,
+          detail: mockDetail,
+        );
+        stepItems = SyncProgress.withActiveStep(
+          template: stepItems,
+          activeId: 'mocktests',
+          step: SyncStep.mockTests,
+          detail: mockDetail,
+        ).steps!;
+        try {
+          final questionCount =
+              await _mockTestRepository.syncTopicForOffline(topicId);
+          if (questionCount > 0) {
+            stats.mockTests++;
+            stats.questions += questionCount;
+          }
+        } catch (e, st) {
+          _logger.w('Mock test sync skipped $topicId', error: e, stackTrace: st);
         }
-      } catch (e, st) {
-        _logger.w('Mock test sync skipped $topicId', error: e, stackTrace: st);
       }
+      _emitStepProgress(
+        onProgress,
+        stepItems,
+        'mocktests',
+        step: SyncStep.mockTests,
+        detail: '${stats.mockTests} mock tests cached',
+        complete: true,
+      );
+      stepItems = SyncProgress.withCompletedSteps(
+        template: stepItems,
+        throughId: 'mocktests',
+        detail: '${stats.mockTests} mock tests cached',
+      ).steps!;
     }
 
-    _emit(SyncStep.progress, onProgress);
+    _emitStepProgress(
+      onProgress,
+      stepItems,
+      'finalize',
+      step: SyncStep.finalizing,
+      detail: 'Building offline views',
+    );
+    stepItems = SyncProgress.withActiveStep(
+      template: stepItems,
+      activeId: 'finalize',
+      step: SyncStep.finalizing,
+      detail: 'Building offline views',
+    ).steps!;
     try {
       await _mockTestRepository.getPerformance(forceRemote: true);
     } catch (_) {}
     await _progressRebuildService.rebuildAll();
     await _persistLastSyncTime(null);
+    _emitStepProgress(
+      onProgress,
+      stepItems,
+      'finalize',
+      step: SyncStep.complete,
+      detail: 'Ready for offline study',
+      complete: true,
+    );
     stats.log(_logger);
+    totalSw.stop();
+    _logger.i(
+      '[Download] ===== full download finished in '
+      '${totalSw.elapsedMilliseconds}ms =====',
+    );
+    ApiCallTracker.instance.logSummary(_logger);
   }
 
   List<int> _resolveMockTestTopicIds() {
@@ -651,6 +1270,7 @@ class SyncService {
   Future<int> syncBundle({bool incremental = false}) async {
     final since = incremental ? lastSyncTime : null;
     final data = await _syncRepository.syncBundle(since: since);
+    _logBundlePayload(data, incremental: incremental);
 
     final dashboard = data['dashboard'];
     final myExams = data['myExams'];
@@ -748,6 +1368,10 @@ class SyncService {
       since: since,
       examIds: scopedExamIds.isEmpty ? null : scopedExamIds,
     );
+    _logCatalogPayload(
+      data,
+      label: scopedExamIds.isEmpty ? 'full' : 'examIds=$scopedExamIds',
+    );
     final serverTime = data['serverTime'] as String?;
 
     if (incremental && since != null) {
@@ -765,10 +1389,16 @@ class SyncService {
     await _store.putJson(LocalStore.syncCatalogMasterKey, data);
     final exams = await _dashboardRepository.resolveMyExamsFromCache();
     for (final exam in exams) {
-      final subjects = await _dashboardRepository.getVisibleSubjectsByExam(
+      var subjects = await _dashboardRepository.getVisibleSubjectsByExam(
         exam.examId,
         forceRemote: false,
       );
+      if (subjects.isEmpty) {
+        subjects = await _dashboardRepository.resolveSubjectsForExam(
+          exam.examId,
+          forceRemote: true,
+        );
+      }
       if (subjects.isNotEmpty) {
         await _progressRepository.materializeSubjectDetailsFromCatalog(
           userExamId: exam.id,
@@ -915,6 +1545,74 @@ class SyncService {
   /// Deprecated — use [runBackgroundSync] or [scheduleBackgroundSync].
   Future<void> fullInitialSync({bool incremental = false, bool force = false}) =>
       runBackgroundSync(fullDownload: !incremental);
+
+  Future<T> _timedDownloadStep<T>(
+    String step,
+    Future<T> Function() action,
+  ) async {
+    final sw = Stopwatch()..start();
+    _logger.i('[Download] → $step');
+    try {
+      return await action();
+    } catch (e, st) {
+      _logger.e(
+        '[Download] ✗ $step failed after ${sw.elapsedMilliseconds}ms',
+        error: e,
+        stackTrace: st,
+      );
+      rethrow;
+    } finally {
+      sw.stop();
+      _logger.i('[Download] ← $step (${sw.elapsedMilliseconds}ms)');
+    }
+  }
+
+  void _logCatalogPayload(
+    Map<String, dynamic> data, {
+    String? label,
+  }) {
+    final exams = (data['exams'] as List?)?.length ?? 0;
+    final subjects = (data['subjects'] as List?)?.length ?? 0;
+    final chapters = (data['chapters'] as List?)?.length ?? 0;
+    final topics = (data['topics'] as List?)?.length ?? 0;
+    _logger.i(
+      '[Download] catalog payload${label != null ? ' ($label)' : ''}: '
+      '$exams exams, $subjects subjects, $chapters chapters, $topics topics',
+    );
+  }
+
+  void _logBundlePayload(
+    Map<String, dynamic> data, {
+    required bool incremental,
+  }) {
+    final myExams = (data['myExams'] as List?)?.length;
+    final changedProgress = (data['changedProgress'] as List?)?.length ?? 0;
+    final progressByExam = (data['subjectProgressByExamId'] as Map?)?.length ?? 0;
+    final hasDashboard = data['dashboard'] != null;
+    _logger.i(
+      '[Download] bundle payload (incremental=$incremental): '
+      'dashboard=$hasDashboard, myExams=$myExams, '
+      'subjectProgressByExamId=$progressByExam, changedProgress=$changedProgress',
+    );
+  }
+}
+
+class _TopicProgressMerge {
+  bool isCompleted = false;
+  double actualHours = 0;
+
+  void apply({required bool isCompleted, required double actualHours}) {
+    if (isCompleted) this.isCompleted = true;
+    if (actualHours > this.actualHours) {
+      this.actualHours = actualHours;
+    }
+  }
+
+  Map<String, dynamic> toPayload(int topicId) => {
+        'topicId': topicId,
+        'isCompleted': isCompleted,
+        'actualHours': actualHours,
+      };
 }
 
 class _StudyLogAggregate {

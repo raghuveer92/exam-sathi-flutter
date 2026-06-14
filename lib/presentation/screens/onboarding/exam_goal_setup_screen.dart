@@ -4,6 +4,7 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/router/app_navigation.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../data/models/exam_model.dart';
 import '../../../data/repositories/dashboard_repository.dart';
@@ -159,9 +160,9 @@ class _ExamGoalSetupScreenState extends State<ExamGoalSetupScreen> {
               ));
           context.read<DashboardBloc>().add(DashboardResetRequested());
           context.read<DashboardBloc>().add(DashboardLoadRequested());
-          context.go('/home');
+          AppNavigation.goIfDifferent(context, '/home');
         } else {
-          context.go('/home');
+          AppNavigation.goIfDifferent(context, '/home');
         }
       }
     } catch (e) {
@@ -199,7 +200,13 @@ class _ExamGoalSetupScreenState extends State<ExamGoalSetupScreen> {
     final examName = _exam?.name ?? user?.selectedExamName ?? 'Your Exam';
     final subjectCount = _exam?.subjectCount;
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        AppNavigation.popOrGoIfDifferent(context, '/my-exams?onboarding=1');
+      },
+      child: Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
@@ -208,7 +215,7 @@ class _ExamGoalSetupScreenState extends State<ExamGoalSetupScreen> {
           icon: const Icon(Icons.arrow_back_ios_rounded, size: 20),
           color: AppColors.textPrimary,
           onPressed: () =>
-              context.canPop() ? context.pop() : context.go('/my-exams?onboarding=1'),
+              AppNavigation.popOrGoIfDifferent(context, '/my-exams?onboarding=1'),
         ),
       ),
       body: SingleChildScrollView(
@@ -327,6 +334,7 @@ class _ExamGoalSetupScreenState extends State<ExamGoalSetupScreen> {
           ],
         ),
       ),
+    ),
     );
   }
 }

@@ -1,86 +1,104 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/router/app_navigation.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/testing/test_keys.dart';
 import '../../../core/utils/responsive_helper.dart';
 import '../../widgets/ads/web_ad_rail.dart';
 
-/// Main scaffold — bottom navigation on mobile/tablet, sidebar on desktop.
+/// Main scaffold — persistent bottom navigation via [StatefulNavigationShell].
+///
+/// Tab switches call [StatefulNavigationShell.goBranch] (no stack growth).
+/// Each tab keeps its own nested navigator for drill-down pages.
 class MainScaffold extends StatelessWidget {
-  final Widget child;
+  final StatefulNavigationShell navigationShell;
 
-  const MainScaffold({super.key, required this.child});
+  const MainScaffold({super.key, required this.navigationShell});
 
-  static const _tabs = [
-    '/home',
-    '/subjects',
-    '/analytics',
-    '/profile',
-  ];
+  void _onTabTap(BuildContext context, int index) {
+    AppNavigation.switchTab(
+      context,
+      index,
+      toRoot: index == navigationShell.currentIndex,
+    );
+  }
 
-  int _currentIndex(BuildContext context) {
-    final location = GoRouterState.of(context).matchedLocation;
-    for (int i = 0; i < _tabs.length; i++) {
-      if (location.startsWith(_tabs[i])) return i;
-    }
-    return 0;
+  void _handleBack(BuildContext context) {
+    AppNavigation.handleNestedBack(context, '/home');
   }
 
   @override
   Widget build(BuildContext context) {
-    final currentIndex = _currentIndex(context);
+    final currentIndex = navigationShell.currentIndex;
 
-    if (ResponsiveHelper.isDesktop(context)) {
-      return Scaffold(
-        backgroundColor: AppColors.background,
-        body: SafeArea(
-          child: Row(
-            children: [
-              _DesktopSidebar(
-                currentIndex: currentIndex,
-                onTap: (i) => context.go(_tabs[i]),
-              ),
-              const VerticalDivider(width: 1, color: AppColors.divider),
-              Expanded(child: child),
-              if (WebAdRail.shouldShow(context)) const WebAdRail(),
-            ],
-          ),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _handleBack(context);
+      },
+      child: ResponsiveHelper.isDesktop(context)
+          ? _buildDesktop(context, currentIndex)
+          : _buildMobile(context, currentIndex),
+    );
+  }
+
+  Widget _buildDesktop(BuildContext context, int currentIndex) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Row(
+          children: [
+            _DesktopSidebar(
+              currentIndex: currentIndex,
+              onTap: (i) => _onTabTap(context, i),
+            ),
+            const VerticalDivider(width: 1, color: AppColors.divider),
+            Expanded(child: navigationShell),
+            if (WebAdRail.shouldShow(context)) const WebAdRail(),
+          ],
         ),
-      );
-    }
+      ),
+    );
+  }
 
+  Widget _buildMobile(BuildContext context, int currentIndex) {
     return Scaffold(
       body: SafeArea(
         bottom: false,
-        child: child,
+        child: navigationShell,
       ),
       bottomNavigationBar: SafeArea(
         top: false,
         child: BottomNavigationBar(
-        currentIndex: currentIndex,
-        onTap: (i) => context.go(_tabs[i]),
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home_rounded),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.menu_book_outlined),
-            activeIcon: Icon(Icons.menu_book_rounded),
-            label: 'Subjects',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.bar_chart_outlined),
-            activeIcon: Icon(Icons.bar_chart_rounded),
-            label: 'Analytics',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline_rounded),
-            activeIcon: Icon(Icons.person_rounded),
-            label: 'Profile',
-          ),
-        ],
+          currentIndex: currentIndex,
+          onTap: (i) => _onTabTap(context, i),
+          items: const [
+            BottomNavigationBarItem(
+              key: TestKeys.navHome,
+              icon: Icon(Icons.home_outlined),
+              activeIcon: Icon(Icons.home_rounded),
+              label: 'Home',
+            ),
+            BottomNavigationBarItem(
+              key: TestKeys.navSubjects,
+              icon: Icon(Icons.menu_book_outlined),
+              activeIcon: Icon(Icons.menu_book_rounded),
+              label: 'Subjects',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.bar_chart_outlined),
+              activeIcon: Icon(Icons.bar_chart_rounded),
+              label: 'Analytics',
+            ),
+            BottomNavigationBarItem(
+              key: TestKeys.navProfile,
+              icon: Icon(Icons.person_outline_rounded),
+              activeIcon: Icon(Icons.person_rounded),
+              label: 'Profile',
+            ),
+          ],
         ),
       ),
     );
@@ -113,7 +131,6 @@ class _DesktopSidebar extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── App brand ───────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 36, 20, 20),
               child: Row(
@@ -143,18 +160,13 @@ class _DesktopSidebar extends StatelessWidget {
             ),
             const Divider(height: 1, color: AppColors.divider),
             const SizedBox(height: 12),
-
-            // ── Nav items ───────────────────────────────────────────────
             for (int i = 0; i < _navItems.length; i++)
               _SidebarNavItem(
                 item: _navItems[i],
                 isActive: currentIndex == i,
                 onTap: () => onTap(i),
               ),
-
             const Spacer(),
-
-            // ── Footer ──────────────────────────────────────────────────
             const Divider(height: 1, color: AppColors.divider),
             Padding(
               padding: const EdgeInsets.all(16),

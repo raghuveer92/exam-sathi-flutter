@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/testing/test_keys.dart';
 import '../../../data/models/exam_subject_group_model.dart';
+
+const _isIntegrationTest = bool.fromEnvironment('INTEGRATION_TEST');
 
 Future<List<Map<String, dynamic>>?> showOptionalSubjectSelectionDialog({
   required BuildContext context,
@@ -11,6 +14,19 @@ Future<List<Map<String, dynamic>>?> showOptionalSubjectSelectionDialog({
   final optionalGroups = groups.where((group) => group.isOptional).toList();
   if (optionalGroups.isEmpty) {
     return const [];
+  }
+
+  if (_isIntegrationTest) {
+    return [
+      for (final group in optionalGroups)
+        {
+          'groupId': group.id,
+          'subjectIds': group.subjects
+              .take(group.minSelection > 0 ? group.minSelection : 1)
+              .map((s) => s.id)
+              .toList(),
+        },
+    ];
   }
 
   final selectedByGroup = {
@@ -124,6 +140,7 @@ Future<List<Map<String, dynamic>>?> showOptionalSubjectSelectionDialog({
                 child: const Text('Cancel'),
               ),
               ElevatedButton(
+                key: TestKeys.optionalSubjectsContinue,
                 onPressed: isValid()
                     ? () => Navigator.of(dialogContext).pop([
                           for (final group in optionalGroups)

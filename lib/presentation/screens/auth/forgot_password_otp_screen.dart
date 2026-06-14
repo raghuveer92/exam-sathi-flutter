@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/router/app_navigation.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../widgets/common/auth_form_layout.dart';
 import '../../widgets/common/gradient_button.dart';
@@ -50,7 +51,8 @@ class _ForgotPasswordOtpScreenState extends State<ForgotPasswordOtpScreen> {
       body: BlocConsumer<AuthBloc, AuthState>(
         listener: (context, state) {
           if (state is AuthForgotPasswordOtpVerified) {
-            context.go(
+            AppNavigation.goIfDifferent(
+              context,
               '/reset-password?email=${Uri.encodeComponent(state.email)}&otp=${Uri.encodeComponent(state.otp)}',
             );
           }

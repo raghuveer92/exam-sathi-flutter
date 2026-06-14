@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/router/app_navigation.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../data/models/mock_test_model.dart';
 import '../../../data/repositories/mock_test_repository.dart';
@@ -87,14 +88,14 @@ class _TestResultScreenState extends State<TestResultScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () => context.go('/mock-test/${widget.topicId}'),
+                    onPressed: () => AppNavigation.goIfDifferent(context, '/mock-test/${widget.topicId}'),
                     child: const Text('Retake Test'),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () => context.go('/subjects'),
+                    onPressed: () => AppNavigation.goIfDifferent(context, '/subjects'),
                     child: const Text('Back to Subjects'),
                   ),
                 ),

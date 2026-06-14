@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/router/app_navigation.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../data/models/mock_test_model.dart';
 import '../../../data/repositories/mock_test_repository.dart';
@@ -93,7 +94,8 @@ class _TopicTestScreenState extends State<TopicTestScreen> {
         timedOut: timedOut,
       );
       if (!mounted) return;
-      context.go(
+      AppNavigation.goIfDifferent(
+        context,
         '/mock-test/${widget.topicId}/result/${result.id}',
         extra: result,
       );
@@ -160,7 +162,7 @@ class _TopicTestScreenState extends State<TopicTestScreen> {
                   ),
                   const SizedBox(height: 24),
                   OutlinedButton(
-                    onPressed: () => context.pop(),
+                    onPressed: () => AppNavigation.pop(context),
                     child: const Text('Go back'),
                   ),
                 ],
@@ -183,7 +185,7 @@ class _TopicTestScreenState extends State<TopicTestScreen> {
                 const Text('No questions were loaded for this test.'),
                 const SizedBox(height: 24),
                 OutlinedButton(
-                  onPressed: () => context.pop(),
+                  onPressed: () => AppNavigation.pop(context),
                   child: const Text('Go back'),
                 ),
               ],

@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:logger/logger.dart';
 
+import '../local/api_call_tracker.dart';
 import 'api_endpoints.dart';
 
 /// Dio HTTP client with JWT interceptor.
@@ -35,6 +36,8 @@ class ApiClient {
   void _setupInterceptors() {
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
+        options.extra['_request_start_ms'] =
+            DateTime.now().millisecondsSinceEpoch;
         final token = await _storage.read(key: _tokenKey);
         if (token != null) {
           options.headers['Authorization'] = 'Bearer $token';
@@ -43,13 +46,23 @@ class ApiClient {
         handler.next(options);
       },
       onResponse: (response, handler) {
+        _logResponseTiming(response.requestOptions, response.statusCode);
         _logger.d('← ${response.statusCode} ${response.requestOptions.path}');
         handler.next(response);
       },
       onError: (error, handler) async {
+        _logResponseTiming(
+          error.requestOptions,
+          error.response?.statusCode,
+          failed: true,
+          message: error.message,
+        );
         _logger.e('API Error: ${error.message}', error: error);
         final statusCode = error.response?.statusCode;
-        if (statusCode == 401 || statusCode == 403) {
+        final path = error.requestOptions.path;
+        final isDeleteAccountAttempt =
+            error.requestOptions.method == 'DELETE' && path.endsWith('/me');
+        if ((statusCode == 401 || statusCode == 403) && !isDeleteAccountAttempt) {
           await _storage.delete(key: _tokenKey);
           onUnauthorized?.call();
         }
@@ -77,4 +90,33 @@ class ApiClient {
   Future<String?> getToken() => _storage.read(key: _tokenKey);
 
   Future<bool> hasToken() async => (await _storage.read(key: _tokenKey)) != null;
+
+  void _logResponseTiming(
+    RequestOptions options,
+    int? statusCode, {
+    bool failed = false,
+    String? message,
+  }) {
+    final started = options.extra['_request_start_ms'] as int?;
+    final elapsed = started == null
+        ? 0
+        : DateTime.now().millisecondsSinceEpoch - started;
+    final query = options.queryParameters.isEmpty
+        ? ''
+        : '?${options.uri.query}';
+    final label = '${options.method} ${options.path}$query';
+
+    ApiCallTracker.instance.recordTimed(
+      label,
+      elapsed,
+      statusCode: statusCode,
+      detail: failed ? message : null,
+    );
+
+    if (failed) {
+      _logger.w('[HTTP] ✗ $label → $statusCode (${elapsed}ms) $message');
+    } else {
+      _logger.i('[HTTP] ✓ $label → $statusCode (${elapsed}ms)');
+    }
+  }
 }

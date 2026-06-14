@@ -3,8 +3,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/router/app_navigation.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/firebase/analytics_service.dart';
+import '../../../core/testing/test_keys.dart';
 import '../../../core/utils/responsive_helper.dart';
 import '../../../data/models/subject_detail_model.dart';
 import '../../../data/models/mock_test_model.dart';
@@ -235,11 +237,19 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    final offline = GetIt.I<ProgressRepository>().tryReadSubjectDetailOffline(
+      subjectId: widget.subjectId,
+      userExamId: widget.userExamId,
+    );
+    if (offline != null) {
+      _detail = offline;
+      _loading = false;
+    }
+    _load(silent: offline != null);
   }
 
   Future<void> _load({bool silent = false}) async {
-    if (!silent) setState(() => _loading = _detail == null);
+    if (!silent && _detail == null) setState(() => _loading = true);
     try {
       final detail = await GetIt.I<ProgressRepository>().getSubjectDetail(
         widget.subjectId,
@@ -305,7 +315,21 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
     final totalTopics = _liveTotalTopics;
 
     final isDesktop = ResponsiveHelper.isDesktop(context);
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (_selectionMode) {
+          _exitSelectionMode();
+        } else {
+          AppNavigation.handleNestedBack(
+            context,
+            '/subjects/exam/${widget.userExamId}',
+          );
+        }
+      },
+      child: Scaffold(
+      key: TestKeys.subjectDetailScreen,
       backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -334,7 +358,10 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
             if (_selectionMode) {
               _exitSelectionMode();
             } else {
-              Navigator.of(context).maybePop();
+              AppNavigation.popOrGoIfDifferent(
+                context,
+                '/subjects/exam/${widget.userExamId}',
+              );
             }
           },
         ),
@@ -434,7 +461,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 6),
                         child: _TopicTile(
-                          key: ValueKey(topic.id),
+                          key: TestKeys.topicTile(topic.id),
                           topic: topic,
                           subjectColor: color,
                           selectionMode: _selectionMode,
@@ -453,6 +480,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
           ),
         ),
       ),
+    ),
     );
   }
 
@@ -872,6 +900,7 @@ class _TopicSelectionPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
+      key: TestKeys.topicSelectionPanel,
       decoration: BoxDecoration(
         color: Colors.white,
         border: const Border(
@@ -919,6 +948,7 @@ class _TopicSelectionPanel extends StatelessWidget {
                             width: compact ? 36 : 44,
                             child: Text(
                               _fmtH(studyHours),
+                              key: TestKeys.studyHoursDisplay,
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: compact ? 15 : 16,
@@ -928,6 +958,7 @@ class _TopicSelectionPanel extends StatelessWidget {
                             ),
                           ),
                           _HourStepButton(
+                            key: TestKeys.studyHoursIncrement,
                             icon: Icons.add_rounded,
                             enabled: !isSaving,
                             onTap: onIncrement,
@@ -940,6 +971,7 @@ class _TopicSelectionPanel extends StatelessWidget {
                       child: SizedBox(
                         height: _ctaHeight,
                         child: FilledButton(
+                          key: TestKeys.markTopicsCompleted,
                           onPressed: isSaving ? null : onMarkCompleted,
                           style: FilledButton.styleFrom(
                             backgroundColor: AppColors.success,
@@ -990,6 +1022,7 @@ class _HourStepButton extends StatelessWidget {
   final VoidCallback onTap;
 
   const _HourStepButton({
+    super.key,
     required this.icon,
     required this.enabled,
     required this.onTap,
@@ -1001,6 +1034,7 @@ class _HourStepButton extends StatelessWidget {
       color: enabled ? const Color(0xFFF3F4F6) : const Color(0xFFFAFAFA),
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
+        key: key,
         onTap: enabled ? onTap : null,
         borderRadius: BorderRadius.circular(10),
         child: SizedBox(
@@ -1103,7 +1137,10 @@ class _CompletedTopicSheetState extends State<_CompletedTopicSheet> {
               onPressed: _mockTestInfo!.canStart
                   ? () {
                       Navigator.pop(context);
-                      context.push('/topic-test/${widget.topic.id}');
+                      AppNavigation.pushIfDifferent(
+                        context,
+                        '/topic-test/${widget.topic.id}',
+                      );
                     }
                   : null,
               icon: const Icon(Icons.quiz_outlined),

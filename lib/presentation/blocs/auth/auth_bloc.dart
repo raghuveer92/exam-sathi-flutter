@@ -1,13 +1,21 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
+import 'package:get_it/get_it.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
+import '../../../core/local/local_store.dart';
+import '../../../core/onboarding/onboarding_wizard_store.dart';
+import '../../../core/sync/offline_queue_service.dart';
 import '../../../data/models/user_model.dart';
 import '../../../data/repositories/auth_repository.dart';
+import '../../../data/repositories/progress_repository.dart';
+import '../../../presentation/blocs/dashboard/dashboard_bloc.dart';
 
 part 'auth_event.dart';
 part 'auth_state.dart';
+
+const _isIntegrationTest = bool.fromEnvironment('INTEGRATION_TEST');
 
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final AuthRepository _authRepository;
@@ -34,6 +42,10 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     AuthCheckRequested event,
     Emitter<AuthState> emit,
   ) async {
+    if (_isIntegrationTest && state is AuthAuthenticated) {
+      return;
+    }
+
     emit(AuthLoading());
 
     final hasToken = await _authRepository.isLoggedIn();
@@ -45,26 +57,26 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     final cached = await _authRepository.restoreSession();
     if (cached != null) {
       if (cached.needsEmailVerification) {
-        await _authRepository.logout();
-        emit(AuthUnauthenticated());
+        await _endSession(emit);
         return;
       }
-      emit(AuthAuthenticated(user: cached, isOfflineSession: true));
+      await _ensureOfflineContentFlag();
+      _emitAuthenticated(emit, cached, isOfflineSession: true);
     }
 
     try {
       final user = await _authRepository.getMe();
       if (user.needsEmailVerification) {
-        await _authRepository.logout();
-        emit(AuthUnauthenticated());
+        await _endSession(emit);
         return;
       }
-      emit(AuthAuthenticated(user: user, isOfflineSession: false));
+      _emitAuthenticated(emit, user, isOfflineSession: false);
+      await _ensureOfflineContentFlag();
     } catch (e) {
       if (cached != null) return;
       final fallback = await _authRepository.restoreSession();
       if (fallback != null) {
-        emit(AuthAuthenticated(user: fallback, isOfflineSession: true));
+        _emitAuthenticated(emit, fallback, isOfflineSession: true);
         return;
       }
       if (e is DioException &&
@@ -79,6 +91,32 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     }
   }
 
+  void _emitAuthenticated(
+    Emitter<AuthState> emit,
+    UserModel user, {
+    required bool isOfflineSession,
+  }) {
+    final current = state;
+    if (current is AuthAuthenticated &&
+        current.isOfflineSession == isOfflineSession &&
+        current.user.id == user.id &&
+        current.user.hasSelectedExam == user.hasSelectedExam &&
+        current.user.hasExamGoal == user.hasExamGoal) {
+      return;
+    }
+    emit(AuthAuthenticated(user: user, isOfflineSession: isOfflineSession));
+  }
+
+  /// Keeps [initialDownloadComplete] in sync with local cache — never clears it.
+  Future<void> _ensureOfflineContentFlag() async {
+    final store = GetIt.I<LocalStore>();
+    if (store.isInitialDownloadComplete()) return;
+
+    if (GetIt.I<ProgressRepository>().hasOfflineStudyContent()) {
+      await store.markInitialDownloadComplete();
+    }
+  }
+
   Future<void> _onLoginRequested(
     AuthLoginRequested event,
     Emitter<AuthState> emit,
@@ -87,9 +125,19 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     try {
       final data = await _authRepository.login(event.email, event.password);
       final user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
+      await _ensureOfflineContentFlag();
       emit(AuthAuthenticated(user: user));
     } catch (e) {
-      emit(AuthError(message: _parseError(e)));
+      final message = _parseError(e);
+      if (_isEmailVerificationRequired(message)) {
+        emit(AuthRegistrationPending(
+          email: event.email.trim(),
+          fullName: _displayNameFromEmail(event.email),
+          password: event.password,
+        ));
+        return;
+      }
+      emit(AuthError(message: message));
     }
   }
 
@@ -192,8 +240,22 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     AuthLogoutRequested event,
     Emitter<AuthState> emit,
   ) async {
+    await _endSession(emit);
+  }
+
+  Future<void> _endSession(Emitter<AuthState> emit) async {
     await _authRepository.logout();
+    _resetLocalSessionState();
     emit(AuthUnauthenticated());
+  }
+
+  /// Clears in-memory UI/session state after Hive is wiped on logout.
+  void _resetLocalSessionState() {
+    try {
+      GetIt.I<OnboardingWizardStore>().reset();
+      GetIt.I<OfflineQueueService>().refreshPendingCount();
+      GetIt.I<DashboardBloc>().add(DashboardResetRequested());
+    } catch (_) {}
   }
 
   Future<void> _onGoogleSignInRequested(
@@ -233,7 +295,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     AuthDeleteAccountRequested event,
     Emitter<AuthState> emit,
   ) async {
-    emit(AuthLoading());
+    final previous = state is AuthAuthenticated ? state as AuthAuthenticated : null;
     try {
       await _authRepository.deleteAccount(
         password: event.password,
@@ -241,7 +303,14 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       );
       emit(AuthUnauthenticated());
     } catch (e) {
-      emit(AuthError(message: _parseError(e)));
+      if (previous != null) {
+        emit(AuthAuthenticated(
+          user: previous.user,
+          isOfflineSession: previous.isOfflineSession,
+        ));
+      } else {
+        emit(AuthError(message: _parseError(e)));
+      }
     }
   }
 
@@ -268,5 +337,17 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     if (s.contains('Exception: ')) return s.split('Exception: ').last.trim();
     if (s.startsWith('Bad state: ')) return s.substring('Bad state: '.length);
     return 'Something went wrong. Please try again.';
+  }
+
+  bool _isEmailVerificationRequired(String message) {
+    final normalized = message.toLowerCase();
+    return normalized.contains('verify your email');
+  }
+
+  String _displayNameFromEmail(String email) {
+    final at = email.indexOf('@');
+    if (at <= 0) return 'there';
+    final local = email.substring(0, at).trim();
+    return local.isNotEmpty ? local : 'there';
   }
 }

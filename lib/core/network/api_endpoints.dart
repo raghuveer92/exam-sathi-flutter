@@ -52,6 +52,7 @@ class ApiEndpoints {
 
   // Progress
   static const String updateProgress = '/progress/topic';
+  static const String bulkUpdateProgress = '/progress/topics/bulk';
   static const String logStudy = '/progress/log';
   static const String weeklyLogs = '/progress/weekly';
   static String subjectDetail(int subjectId) => '/progress/subject/$subjectId';

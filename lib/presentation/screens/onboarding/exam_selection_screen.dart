@@ -3,8 +3,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/router/app_navigation.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/firebase/analytics_service.dart';
+import '../../../core/network/api_error_message.dart';
 import '../../../data/models/exam_subject_group_model.dart';
 import '../../../data/models/exam_model.dart';
 import '../../../data/repositories/dashboard_repository.dart';
@@ -39,9 +41,10 @@ class _ExamSelectionScreenState extends State<ExamSelectionScreen> {
   Future<void> _loadExams() async {
     try {
       final repo = GetIt.I<DashboardRepository>();
+      final enrolledIds = await repo.getEnrolledExamIds();
       final exams = await repo.getExams();
       setState(() {
-        _exams = exams;
+        _exams = repo.excludeEnrolledExams(exams, enrolledIds);
         _loading = false;
       });
     } catch (e) {
@@ -54,6 +57,16 @@ class _ExamSelectionScreenState extends State<ExamSelectionScreen> {
     try {
       final repo = GetIt.I<DashboardRepository>();
       final exam = _exams.firstWhere((e) => e.id == _selected);
+      if (await repo.isExamAlreadyEnrolled(exam.id)) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('You are already enrolled in this exam'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+        return;
+      }
       final groups = await repo.getExamSubjectGroups(exam.id);
       final selections = await _collectSelections(exam.name, groups);
       if (selections == null) return;
@@ -81,11 +94,11 @@ class _ExamSelectionScreenState extends State<ExamSelectionScreen> {
 
           if (widget.isChangeMode) {
             context.read<DashboardBloc>().add(DashboardResetRequested());
-            context.go('/exam-goal', extra: exam);
+            AppNavigation.goIfDifferent(context, '/exam-goal', extra: exam);
           }
           // For onboarding flow, refreshListenable triggers navigation.
         } else {
-          context.go('/exam-goal', extra: exam);
+          AppNavigation.goIfDifferent(context, '/exam-goal', extra: exam);
         }
       }
     } catch (e) {

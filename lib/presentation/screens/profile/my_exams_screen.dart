@@ -3,8 +3,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/router/app_navigation.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/study/daily_target_calculator.dart';
+import '../../../core/network/api_error_message.dart';
 import '../../../core/sync/progress_rebuild_service.dart';
 import '../../../data/models/exam_subject_group_model.dart';
 import '../../../data/models/exam_model.dart';
@@ -158,7 +160,10 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
       if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+        SnackBar(
+          content: Text(apiErrorMessage(e)),
+          backgroundColor: AppColors.error,
+        ),
       );
     }
   }
@@ -183,7 +188,7 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
   Future<void> _continueOnboarding() async {
     await _syncUserInState();
     if (!mounted) return;
-    context.go('/exam-goal');
+    AppNavigation.goIfDifferent(context, '/exam-goal');
   }
 
   Future<void> _addExam() async {
@@ -430,6 +435,15 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
     );
 
     if (ok != true || selected == null) return;
+    if (existingExamIds.contains(selected!.id)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You are already enrolled in this exam'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
     final groups = await _repo.getExamSubjectGroups(selected!.id);
     final selections = await _collectSelections(selected!.name, groups);
     if (selections == null) return;
@@ -441,19 +455,23 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
         examDate: targetDate,
         subjectSelections: selections,
       );
-      await GetIt.I<AuthRepository>().cacheUser(user);
-      await _repo.applyEnrollmentToCache(user);
+      final cachedUser = await _repo.applyEnrollmentToCache(user);
+      await GetIt.I<AuthRepository>().cacheUser(cachedUser);
       if (!mounted) return;
-      context.read<AuthBloc>().add(AuthUserUpdated(user: user));
+      context.read<AuthBloc>().add(AuthUserUpdated(user: cachedUser));
       context.read<DashboardBloc>().add(DashboardResetRequested());
-      context.go(
+      AppNavigation.replaceTo(
+        context,
         '/offline-setup?mode=enrollment&redirect=${Uri.encodeComponent('/my-exams')}&title=${Uri.encodeComponent('Downloading Exam Content')}',
       );
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+        SnackBar(
+          content: Text(apiErrorMessage(e)),
+          backgroundColor: AppColors.error,
+        ),
       );
     }
   }
@@ -540,9 +558,10 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
             const SizedBox(height: 28),
             GradientButton(
               label: 'Add Your First Exam',
-              onPressed: () => context.push(
+              onPressed: () => AppNavigation.pushIfDifferent(
+                context,
                 widget.isOnboarding
-                    ? '/add-exam?onboarding=1'
+                    ? '/onboarding/choose-exam'
                     : '/add-exam',
               ),
             ),
@@ -604,8 +623,9 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('My Exams')),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push(
-          widget.isOnboarding ? '/add-exam?onboarding=1' : '/add-exam',
+        onPressed: () => AppNavigation.pushIfDifferent(
+          context,
+          widget.isOnboarding ? '/onboarding/choose-exam' : '/add-exam',
         ),
         label: const Text('Add Exam'),
         icon: const Icon(Icons.add),
@@ -713,7 +733,8 @@ class _MyExamsScreenState extends State<MyExamsScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _myExams.isEmpty
-                      ? () => context.push('/add-exam?onboarding=1')
+                      ? () => AppNavigation.pushIfDifferent(
+                          context, '/onboarding/choose-exam')
                       : _continueOnboarding,
                   child: Text(
                     _myExams.isEmpty

@@ -6,8 +6,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/router/app_navigation.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/firebase/analytics_service.dart';
+import '../../../core/testing/test_keys.dart';
 import '../../../data/models/dashboard_model.dart';
 import '../../../data/models/subject_progress_model.dart';
 import '../../../data/models/user_exam_model.dart';
@@ -99,7 +101,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       await repo.setActiveMyExam(exam.id);
       if (!mounted) return;
       context.read<DashboardBloc>().add(DashboardLoadRequested());
-      context.push('/subjects/exam/${exam.id}');
+      AppNavigation.pushIfDifferent(context, '/subjects/exam/${exam.id}');
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -134,6 +136,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: TestKeys.dashboardScreen,
       backgroundColor: AppColors.background,
       body: BlocConsumer<DashboardBloc, DashboardState>(
         listener: (context, state) {},
@@ -227,7 +230,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _MyExamsSection(
           exams: exams,
           onActivate: _activateExam,
-          onViewAll: () => context.push('/my-exams'),
+          onViewAll: () => AppNavigation.pushIfDifferent(context, '/my-exams'),
           primary: _brandPrimary,
         ),
         const SizedBox(height: 18),
@@ -269,7 +272,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   _MyExamsSection(
                     exams: exams,
                     onActivate: _activateExam,
-                    onViewAll: () => context.push('/my-exams'),
+                    onViewAll: () => AppNavigation.pushIfDifferent(context, '/my-exams'),
                     primary: _brandPrimary,
                   ),
                 ],
@@ -557,6 +560,7 @@ class PremiumDashboardCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       '$topicsDone of $topicsTotal topics',
+                      key: TestKeys.dashboardSyllabusProgress,
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                             color: Colors.white,
                             fontWeight: FontWeight.w800,
@@ -949,7 +953,10 @@ class _SubjectRow extends StatelessWidget {
             await repo.setActiveMyExam(exam.id);
           }
           if (!context.mounted) return;
-          context.go('/subjects/exam/${exam.id}/${subject.subjectId}');
+          AppNavigation.pushIfDifferent(
+            context,
+            '/subjects/exam/${exam.id}/${subject.subjectId}',
+          );
         },
         child: Container(
           padding: const EdgeInsets.all(12),

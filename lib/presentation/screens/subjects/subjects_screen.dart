@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/router/app_navigation.dart';
 import '../../../core/firebase/analytics_service.dart';
+import '../../../core/testing/test_keys.dart';
 import '../../../data/models/subject_model.dart';
 import '../../../data/models/subject_progress_model.dart';
 import '../../../data/models/user_exam_model.dart';
@@ -223,12 +225,16 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
     final totalTopics = progress?.totalTopics ?? subject.topicCount;
 
     return InkWell(
+      key: TestKeys.subjectRow(subject.id),
       onTap: () async {
         if (!group.exam.isActive) {
           await _repo.setActiveMyExam(group.exam.id);
         }
         if (!mounted) return;
-        await context.push('/subjects/exam/${group.exam.id}/${subject.id}');
+        await AppNavigation.pushIfDifferent(
+          context,
+          '/subjects/exam/${group.exam.id}/${subject.id}',
+        );
         if (!mounted) return;
         _loadFromLocal();
       },

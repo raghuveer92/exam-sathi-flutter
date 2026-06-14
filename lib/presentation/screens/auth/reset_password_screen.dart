@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
+import '../../../core/router/app_navigation.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../widgets/common/app_text_field.dart';
 import '../../widgets/common/auth_form_layout.dart';
@@ -56,7 +57,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                 backgroundColor: AppColors.success,
               ),
             );
-            context.go('/login');
+            AppNavigation.goIfDifferent(context, '/login');
           }
           if (state is AuthError) {
             ScaffoldMessenger.of(context).showSnackBar(

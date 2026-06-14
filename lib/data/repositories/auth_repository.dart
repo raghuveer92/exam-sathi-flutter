@@ -145,9 +145,7 @@ class AuthRepository {
   Future<void> logout() async {
     await _googleAuth.signOut();
     await _client.clearToken();
-    await _store.deleteKey(LocalStore.userProfileKey);
-    await _store.resetInitialDownloadComplete();
-    await _store.clearLastSyncTime();
+    await _store.clearAll();
   }
 
   /// Permanently deletes the account on the server and wipes all local data.
@@ -159,11 +157,9 @@ class AuthRepository {
         if (idToken != null) 'idToken': idToken,
       },
     );
+    await _googleAuth.signOut();
     await _client.clearToken();
-    await _store.clearUserStudyData();
-    await _store.deleteKey(LocalStore.cachedUserIdKey);
-    await _store.resetInitialDownloadComplete();
-    await _store.clearLastSyncTime();
+    await _store.clearAll();
   }
 
   Future<bool> isLoggedIn() => _client.hasToken();

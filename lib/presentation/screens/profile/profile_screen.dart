@@ -8,11 +8,15 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/auth/google_auth_config.dart';
 import '../../../core/auth/google_auth_service.dart';
+import '../../../core/router/app_navigation.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/network/api_error_message.dart';
+import '../../../core/testing/test_keys.dart';
 import '../../../core/sync/sync_service.dart';
 import '../../../core/utils/responsive_helper.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
+import '../../../data/repositories/auth_repository.dart';
 import '../../widgets/manual_sync_button.dart';
 import '../../widgets/common/google_sign_in_button.dart';
 
@@ -110,7 +114,7 @@ class ProfileScreen extends StatelessWidget {
                 _ProfileTile(
                   icon: Icons.school_outlined,
                   label: 'My Exams',
-                  onTap: () => context.go('/my-exams'),
+                  onTap: () => AppNavigation.pushIfDifferent(context, '/my-exams'),
                 ),
                 _ProfileTile(
                   icon: Icons.notifications_outlined,
@@ -124,18 +128,20 @@ class ProfileScreen extends StatelessWidget {
                 ),
                 const Divider(height: 24),
                 _ProfileTile(
+                  key: TestKeys.profileDeleteAccount,
                   icon: Icons.delete_forever_outlined,
                   label: 'Delete Account',
                   color: AppColors.error,
                   onTap: () => _confirmDeleteAccount(context),
                 ),
                 _ProfileTile(
+                  key: TestKeys.profileLogout,
                   icon: Icons.logout_rounded,
                   label: 'Logout',
                   color: AppColors.error,
                   onTap: () {
                     context.read<AuthBloc>().add(AuthLogoutRequested());
-                    context.go('/login');
+                    AppNavigation.goIfDifferent(context, '/login');
                   },
                 ),
               ],
@@ -146,6 +152,14 @@ class ProfileScreen extends StatelessWidget {
         },
       ),
     );
+  }
+
+  /// Dialogs use the root navigator; shell [context] must not be popped directly.
+  static void _popRootOverlayIfPresent(BuildContext context) {
+    final navigator = Navigator.of(context, rootNavigator: true);
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
   }
 
   Future<void> _confirmResetDownload(BuildContext context) async {
@@ -174,13 +188,17 @@ class ProfileScreen extends StatelessWidget {
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => const AlertDialog(
-        content: Row(
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 20),
-            Expanded(child: Text('Downloading all content…')),
-          ],
+      useRootNavigator: true,
+      builder: (ctx) => const PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 20),
+              Expanded(child: Text('Downloading all content…')),
+            ],
+          ),
         ),
       ),
     );
@@ -190,17 +208,19 @@ class ProfileScreen extends StatelessWidget {
         onProgress: (_) {},
       );
       if (!context.mounted) return;
-      Navigator.pop(context);
       context.read<DashboardBloc>().add(DashboardLoadRequested());
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Full re-download complete')),
       );
     } catch (e) {
       if (!context.mounted) return;
-      Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Re-download failed: $e')),
       );
+    } finally {
+      if (context.mounted) {
+        _popRootOverlayIfPresent(context);
+      }
     }
   }
 
@@ -270,52 +290,16 @@ class ProfileScreen extends StatelessWidget {
   }
 
   Future<void> _confirmDeleteWithPassword(BuildContext context) async {
-    final passwordController = TextEditingController();
-    final confirmed = await showDialog<bool>(
+    final password = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete account?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'This permanently deletes your account, exam enrollments, '
-              'study progress, and test history. This cannot be undone.',
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: passwordController,
-              obscureText: true,
-              autofillHints: const [AutofillHints.password],
-              decoration: const InputDecoration(
-                labelText: 'Confirm your password',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete account'),
-          ),
-        ],
-      ),
+      builder: (ctx) => const _DeleteAccountPasswordDialog(),
     );
-    final password = passwordController.text;
-    passwordController.dispose();
-    if (confirmed != true || password.isEmpty || !context.mounted) {
-      if (confirmed == true && password.isEmpty && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Enter your password to continue')),
-        );
-      }
+    if (!context.mounted) return;
+    if (password == null) return;
+    if (password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter your password to continue')),
+      );
       return;
     }
 
@@ -327,44 +311,110 @@ class ProfileScreen extends StatelessWidget {
     String? password,
     String? idToken,
   }) async {
+    if (!context.mounted) return;
+
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => const AlertDialog(
-        content: Row(
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 20),
-            Expanded(child: Text('Deleting account…')),
-          ],
+      useRootNavigator: true,
+      builder: (ctx) => const PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 20),
+              Expanded(child: Text('Deleting account…')),
+            ],
+          ),
         ),
       ),
     );
 
     final authBloc = context.read<AuthBloc>();
-    final resultFuture = authBloc.stream.firstWhere(
-      (state) => state is AuthUnauthenticated || state is AuthError,
-    );
-    authBloc.add(AuthDeleteAccountRequested(
-      password: password,
-      idToken: idToken,
-    ));
-    await resultFuture;
-
-    if (!context.mounted) return;
-    Navigator.pop(context);
-
-    final state = authBloc.state;
-    if (state is AuthError) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(state.message)),
+    try {
+      await GetIt.I<AuthRepository>().deleteAccount(
+        password: password,
+        idToken: idToken,
       );
-      return;
+      if (!context.mounted) return;
+      authBloc.add(AuthLogoutRequested());
+      AppNavigation.goIfDifferent(context, '/login');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Your account has been deleted')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(apiErrorMessage(e)),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    } finally {
+      if (context.mounted) {
+        _popRootOverlayIfPresent(context);
+      }
     }
+  }
+}
 
-    context.go('/login');
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Your account has been deleted')),
+/// Password confirmation before account deletion.
+class _DeleteAccountPasswordDialog extends StatefulWidget {
+  const _DeleteAccountPasswordDialog();
+
+  @override
+  State<_DeleteAccountPasswordDialog> createState() =>
+      _DeleteAccountPasswordDialogState();
+}
+
+class _DeleteAccountPasswordDialogState
+    extends State<_DeleteAccountPasswordDialog> {
+  final _passwordController = TextEditingController();
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Delete account?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'This permanently deletes your account, exam enrollments, '
+            'study progress, and test history. This cannot be undone.',
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            key: TestKeys.deleteAccountPassword,
+            controller: _passwordController,
+            obscureText: true,
+            autofillHints: const [AutofillHints.password],
+            decoration: const InputDecoration(
+              labelText: 'Confirm your password',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: TestKeys.deleteAccountConfirm,
+          style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+          onPressed: () => Navigator.pop(context, _passwordController.text),
+          child: const Text('Delete account'),
+        ),
+      ],
     );
   }
 }
@@ -466,6 +516,7 @@ class _ProfileTile extends StatelessWidget {
   final Color? color;
 
   const _ProfileTile({
+    super.key,
     required this.icon,
     required this.label,
     required this.onTap,
@@ -476,6 +527,7 @@ class _ProfileTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = color ?? AppColors.textPrimary;
     return ListTile(
+      key: key,
       contentPadding: EdgeInsets.zero,
       leading: Icon(icon, color: c),
       title: Text(label, style: TextStyle(color: c, fontWeight: FontWeight.w500)),

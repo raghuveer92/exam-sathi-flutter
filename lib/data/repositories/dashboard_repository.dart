@@ -627,6 +627,23 @@ class DashboardRepository {
     return exams.isNotEmpty ? exams.first.id : null;
   }
 
+  Future<Set<int>> getEnrolledExamIds() async {
+    final exams = await resolveMyExamsFromCache();
+    return exams.map((e) => e.examId).toSet();
+  }
+
+  List<ExamModel> excludeEnrolledExams(
+    Iterable<ExamModel> exams,
+    Set<int> enrolledExamIds,
+  ) {
+    return exams.where((e) => !enrolledExamIds.contains(e.id)).toList();
+  }
+
+  Future<bool> isExamAlreadyEnrolled(int examId) async {
+    final enrolled = await getEnrolledExamIds();
+    return enrolled.contains(examId);
+  }
+
   /// Visible subjects from cache, or derived from subject-progress rows.
   List<SubjectModel> resolveVisibleSubjects(int examId) {
     final visible = getVisibleSubjectsCached(examId);
@@ -713,6 +730,33 @@ class DashboardRepository {
     final examId = user['selectedExamId'];
     if (examId == null) return;
     _store.putJson(_store.subjectProgressKey((examId as num).toInt()), progress);
+  }
+
+  /// Replace cached subject progress rows after a bulk progress upload.
+  Future<void> cacheSubjectProgressList(
+    int examId,
+    List<dynamic> subjectProgress,
+  ) async {
+    if (subjectProgress.isEmpty) return;
+    await _store.putJson(
+      _store.subjectProgressKey(examId),
+      subjectProgress,
+    );
+
+    final dashboard = _store.getJson(LocalStore.dashboardKey);
+    if (dashboard != null) {
+      dashboard['subjectProgress'] = subjectProgress;
+      await _store.putJson(LocalStore.dashboardKey, dashboard);
+    }
+  }
+
+  /// Sets active exam on the server only when local cache says another exam is active.
+  Future<void> ensureActiveMyExamForSync(int userExamId) async {
+    final exams = await resolveMyExamsFromCache();
+    final alreadyActive =
+        exams.any((exam) => exam.id == userExamId && exam.isActive);
+    if (alreadyActive) return;
+    await setActiveMyExam(userExamId);
   }
 
   /// Build subject groups purely from local cache (never hits network).
@@ -1117,22 +1161,43 @@ class DashboardRepository {
   }
 
   /// Persist enrollment/add-exam API response before running a full download.
-  Future<void> applyEnrollmentToCache(UserModel user) async {
-    await _store.putJson(LocalStore.userProfileKey, user.toJson());
-    if (user.userExams.isNotEmpty) {
-      final examsJson = user.userExams.map((e) => e.toJson()).toList();
+  Future<UserModel> applyEnrollmentToCache(UserModel user) async {
+    var resolved = user;
+    if (user.userExams.isEmpty) {
+      final remote = await getMyExams(forceRemote: true);
+      if (remote.isNotEmpty) {
+        int? activeId = user.activeUserExamId;
+        if (activeId == null) {
+          for (final exam in remote) {
+            if (exam.isActive) {
+              activeId = exam.id;
+              break;
+            }
+          }
+        }
+        activeId ??= remote.first.id;
+        resolved = user.copyWith(
+          userExams: remote,
+          activeUserExamId: activeId,
+        );
+      }
+    }
+
+    await _store.putJson(LocalStore.userProfileKey, resolved.toJson());
+    if (resolved.userExams.isNotEmpty) {
+      final examsJson = resolved.userExams.map((e) => e.toJson()).toList();
       await _store.putJson(LocalStore.myExamsKey, examsJson);
     }
 
     final dashData = _store.getJson(LocalStore.dashboardKey);
     if (dashData != null) {
-      await _applyUserToCache(user);
-      return;
+      await _applyUserToCache(resolved);
+      return resolved;
     }
 
     await _store.putJson(LocalStore.dashboardKey, {
-      'user': user.toJson(),
-      'myExams': user.userExams.map((e) => e.toJson()).toList(),
+      'user': resolved.toJson(),
+      'myExams': resolved.userExams.map((e) => e.toJson()).toList(),
       'subjectProgress': const <dynamic>[],
       'weeklyLogs': const <dynamic>[],
       'totalTopics': 0,
@@ -1142,8 +1207,9 @@ class DashboardRepository {
       'totalEstimatedHours': 0.0,
       'todayHours': 0.0,
       'todayTopicsCompleted': 0,
-      'studyStreakDays': user.studyStreakDays,
+      'studyStreakDays': resolved.studyStreakDays,
     });
+    return resolved;
   }
 
   Future<void> _queueActiveExamChange(int userExamId) async {

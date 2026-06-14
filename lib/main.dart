@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -18,10 +19,14 @@ import 'core/local/local_store.dart';
 import 'core/router/app_router.dart';
 import 'core/sync/sync_service.dart';
 import 'core/theme/app_theme.dart';
+import 'data/repositories/progress_repository.dart';
 import 'presentation/blocs/auth/auth_bloc.dart';
 import 'presentation/blocs/dashboard/dashboard_bloc.dart';
 
 Object? _semanticsHandle;
+
+/// Set via `--dart-define=INTEGRATION_TEST=true` when running integration tests.
+const _isIntegrationTest = bool.fromEnvironment('INTEGRATION_TEST');
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -50,11 +55,13 @@ void main() async {
   };
 
   try {
-    if (kIsWeb && AdConfig.hasManualRail) {
+    if (kIsWeb && AdConfig.hasManualRail && !_isIntegrationTest) {
       FlutterAdsense().initialize(AdConfig.clientId);
     }
-    await FirebaseInitializer.initialize();
-    AnalyticsService.logAppOpen();
+    if (!_isIntegrationTest) {
+      await FirebaseInitializer.initialize();
+      AnalyticsService.logAppOpen();
+    }
     await setupDependencies();
     runApp(const ExamSaathiApp());
   } catch (e, stack) {
@@ -77,7 +84,11 @@ class _ExamSaathiAppState extends State<ExamSaathiApp> {
   @override
   void initState() {
     super.initState();
-    _authBloc = GetIt.I<AuthBloc>()..add(AuthCheckRequested());
+    _authBloc = GetIt.I<AuthBloc>();
+    // Avoid redundant getMe during integration tests — it remounts the onboarding wizard.
+    if (!_isIntegrationTest || _authBloc.state is AuthInitial) {
+      _authBloc.add(AuthCheckRequested());
+    }
     _router = AppRouter.createRouter(_authBloc);
   }
 
@@ -101,7 +112,14 @@ class _ExamSaathiAppState extends State<ExamSaathiApp> {
             AnalyticsService.logLogout();
           }
           if (state is AuthAuthenticated) {
-            if (GetIt.I<LocalStore>().isInitialDownloadComplete()) {
+            final store = GetIt.I<LocalStore>();
+            final hasContent =
+                GetIt.I<ProgressRepository>().hasOfflineStudyContent();
+            if (!_isIntegrationTest &&
+                (store.isInitialDownloadComplete() || hasContent)) {
+              if (!store.isInitialDownloadComplete() && hasContent) {
+                unawaited(store.markInitialDownloadComplete());
+              }
               GetIt.I<SyncService>().scheduleBackgroundSync();
             }
           }

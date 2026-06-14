@@ -5,6 +5,8 @@ import 'package:hive_flutter/hive_flutter.dart';
 /// Hive-backed local cache for offline-first reads.
 class LocalStore {
   static const String _boxName = 'examsaathi_cache';
+  /// Exposed for integration-test cache wipe on web.
+  static const String boxNameForTests = _boxName;
   static const String dashboardKey = 'dashboard';
   static const String myExamsKey = 'my_exams';
   static const String catalogKey = 'exam_catalog';

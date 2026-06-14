@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/router/app_navigation.dart';
 import '../../../core/firebase/analytics_service.dart';
+import '../../../core/testing/test_keys.dart';
 import '../../../data/models/subject_model.dart';
 import '../../../data/models/subject_progress_model.dart';
 import '../../../data/models/user_exam_model.dart';
@@ -78,7 +80,10 @@ class _ExamSubjectsScreenState extends State<ExamSubjectsScreen> {
       await _repo.setActiveMyExam(exam.id);
     }
     if (!mounted) return;
-    await context.push('/subjects/exam/${widget.userExamId}/${subject.id}');
+    await AppNavigation.pushIfDifferent(
+      context,
+      '/subjects/exam/${widget.userExamId}/${subject.id}',
+    );
     if (!mounted) return;
     await _loadFromLocal();
   }
@@ -87,10 +92,20 @@ class _ExamSubjectsScreenState extends State<ExamSubjectsScreen> {
   Widget build(BuildContext context) {
     final exam = _exam;
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        AppNavigation.handleNestedBack(context, '/home');
+      },
+      child: Scaffold(
       backgroundColor: const Color(0xFFF7F8FC),
       appBar: AppBar(
         title: Text(exam?.examName ?? 'Subjects'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+          onPressed: () => AppNavigation.popOrGoIfDifferent(context, '/home'),
+        ),
         actions: [
           SyncRefreshButton(onRefreshed: _loadFromLocal),
         ],
@@ -115,6 +130,7 @@ class _ExamSubjectsScreenState extends State<ExamSubjectsScreen> {
                     ],
                   ),
                 ),
+    ),
     );
   }
 
@@ -212,6 +228,7 @@ class _ExamSubjectsScreenState extends State<ExamSubjectsScreen> {
     final totalTopics = progress?.totalTopics ?? subject.topicCount;
 
     return Container(
+      key: TestKeys.subjectRow(subject.id),
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: Colors.white,

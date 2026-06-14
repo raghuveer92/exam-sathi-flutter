@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/responsive_helper.dart';
+import '../../../core/router/app_navigation.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../widgets/common/app_text_field.dart';
 import '../../widgets/common/auth_form_layout.dart';
@@ -43,7 +44,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       body: BlocConsumer<AuthBloc, AuthState>(
         listener: (context, state) {
           if (state is AuthForgotPasswordPending) {
-            context.go('/forgot-password-otp?email=${Uri.encodeComponent(state.email)}');
+            AppNavigation.goIfDifferent(context, '/forgot-password-otp?email=${Uri.encodeComponent(state.email)}');
           }
           if (state is AuthError) {
             ScaffoldMessenger.of(context).showSnackBar(

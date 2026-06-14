@@ -30,15 +30,21 @@ class GoogleAuthService {
   Future<void> _ensureInitialized() {
     if (!isAvailable) return Future.value();
     if (_initialized) return Future.value();
-    return _initFuture ??= _initOnce();
+    _initFuture ??= _initOnce();
+    return _initFuture!;
   }
 
   Future<void> _initOnce() async {
-    await GoogleSignIn.instance.initialize(
-      clientId: kIsWeb ? GoogleAuthConfig.webClientId : null,
-      // serverClientId is Android/iOS only — web asserts if this is set.
-      serverClientId: kIsWeb ? null : GoogleAuthConfig.webClientId,
-    );
+    try {
+      await GoogleSignIn.instance.initialize(
+        clientId: kIsWeb ? GoogleAuthConfig.webClientId : null,
+        // serverClientId is Android/iOS only — web asserts if this is set.
+        serverClientId: kIsWeb ? null : GoogleAuthConfig.webClientId,
+      );
+    } on StateError catch (e) {
+      // Hot restart on web: GIS script may already be loaded in the page.
+      if (!e.message.contains('Future already completed')) rethrow;
+    }
 
     if (kIsWeb) {
       _attachWebCredentialListener();

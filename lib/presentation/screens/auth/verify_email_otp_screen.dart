@@ -4,7 +4,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/testing/test_keys.dart';
 import '../../../core/utils/responsive_helper.dart';
+import '../../../core/router/app_navigation.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../widgets/common/auth_form_layout.dart';
 import '../../widgets/common/gradient_button.dart';
@@ -70,7 +72,7 @@ class _VerifyEmailOtpScreenState extends State<VerifyEmailOtpScreen> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/login'),
+          onPressed: () => AppNavigation.goIfDifferent(context, '/login'),
         ),
       ),
       body: BlocConsumer<AuthBloc, AuthState>(
@@ -103,6 +105,7 @@ class _VerifyEmailOtpScreenState extends State<VerifyEmailOtpScreen> {
                 ),
                 const SizedBox(height: 24),
                 TextField(
+                  key: TestKeys.otpField,
                   controller: _otpCtrl,
                   keyboardType: TextInputType.number,
                   textAlign: TextAlign.center,
@@ -123,6 +126,7 @@ class _VerifyEmailOtpScreenState extends State<VerifyEmailOtpScreen> {
                 ),
                 const SizedBox(height: 32),
                 GradientButton(
+                  key: TestKeys.otpVerifySubmit,
                   label: 'Verify Email',
                   isLoading: state is AuthLoading,
                   onPressed: _verify,

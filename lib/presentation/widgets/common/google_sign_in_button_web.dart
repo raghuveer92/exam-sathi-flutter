@@ -36,6 +36,7 @@ class _GoogleSignInWebButtonState extends State<_GoogleSignInWebButton> {
   @override
   void initState() {
     super.initState();
+    // DI initializes GIS at startup; this is a no-op when already ready.
     _ready = GetIt.I<GoogleAuthService>().initialize();
   }
 
