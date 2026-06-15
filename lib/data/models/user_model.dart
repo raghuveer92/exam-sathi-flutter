@@ -9,7 +9,7 @@ class UserModel extends Equatable {
   final String? avatarUrl;
   final int? selectedExamId;
   final String? selectedExamName;
-  final String? examDate;           // ISO date: 2027-03-15
+  final String? examDate; // ISO date: 2027-03-15
   final String? syllabusTargetDate; // ISO date: 2027-02-13
   final double? dailyTargetHours;
   final double? weeklyTargetHours;
@@ -21,6 +21,8 @@ class UserModel extends Equatable {
   final bool isEmailVerified;
   final List<String> roles;
   final String authProvider;
+  final bool dailyProgressReminderEnabled;
+  final String dailyProgressReminderTime;
 
   const UserModel({
     required this.id,
@@ -42,6 +44,8 @@ class UserModel extends Equatable {
     this.isEmailVerified = false,
     this.roles = const [],
     this.authProvider = 'EMAIL',
+    this.dailyProgressReminderEnabled = true,
+    this.dailyProgressReminderTime = '22:00',
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json) => UserModel(
@@ -59,9 +63,9 @@ class UserModel extends Equatable {
         daysUntilExam: (json['daysUntilExam'] as num?)?.toInt(),
         activeUserExamId: (json['activeUserExamId'] as num?)?.toInt(),
         userExams: (json['userExams'] as List<dynamic>?)
-            ?.map((e) => UserExamModel.fromJson(e as Map<String, dynamic>))
-            .toList() ??
-          [],
+                ?.map((e) => UserExamModel.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            [],
         studyStreakDays: (json['studyStreakDays'] as num?)?.toInt() ?? 0,
         isActive: (json['isActive'] as bool?) ?? true,
         isEmailVerified: (json['isEmailVerified'] as bool?) ?? false,
@@ -70,6 +74,10 @@ class UserModel extends Equatable {
                 .toList() ??
             [],
         authProvider: json['authProvider'] as String? ?? 'EMAIL',
+        dailyProgressReminderEnabled:
+            json['dailyProgressReminderEnabled'] as bool? ?? true,
+        dailyProgressReminderTime:
+            json['dailyProgressReminderTime'] as String? ?? '22:00',
       );
 
   Map<String, dynamic> toJson() => {
@@ -90,6 +98,8 @@ class UserModel extends Equatable {
         'isEmailVerified': isEmailVerified,
         'roles': roles,
         'authProvider': authProvider,
+        'dailyProgressReminderEnabled': dailyProgressReminderEnabled,
+        'dailyProgressReminderTime': dailyProgressReminderTime,
       };
 
   bool get isAdmin => roles.contains('ROLE_ADMIN');
@@ -113,7 +123,8 @@ class UserModel extends Equatable {
     bool clearExamDate = false,
     bool clearSyllabusTargetDate = false,
     bool clearDaysUntilExam = false,
-  }) => UserModel(
+  }) =>
+      UserModel(
         id: id,
         email: email,
         fullName: fullName,
@@ -136,6 +147,8 @@ class UserModel extends Equatable {
         isEmailVerified: isEmailVerified,
         roles: roles,
         authProvider: authProvider,
+        dailyProgressReminderEnabled: dailyProgressReminderEnabled,
+        dailyProgressReminderTime: dailyProgressReminderTime,
       );
 
   @override
@@ -148,5 +161,7 @@ class UserModel extends Equatable {
         activeUserExamId,
         userExams,
         studyStreakDays,
+        dailyProgressReminderEnabled,
+        dailyProgressReminderTime,
       ];
 }

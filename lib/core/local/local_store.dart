@@ -21,6 +21,9 @@ class LocalStore {
   static const String syncStatusKey = 'sync_status';
   static const String initialDownloadCompleteKey = 'initial_download_complete';
   static const String cachedUserIdKey = 'cached_user_id';
+  static const String dailyProgressReminderKey =
+      'daily_progress_reminder_settings';
+  static const String dailyNoStudyDaysKey = 'daily_no_study_days';
 
   Box<String>? _box;
 

@@ -12,6 +12,7 @@ import '../../data/models/user_exam_model.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../core/sync/progress_rebuild_service.dart';
 import '../../data/repositories/dashboard_repository.dart';
+import '../../data/repositories/daily_progress_reminder_repository.dart';
 import '../../data/repositories/mock_test_repository.dart';
 import '../../data/repositories/progress_repository.dart';
 import '../../data/repositories/sync_repository.dart';
@@ -31,6 +32,7 @@ class SyncService {
     required AuthRepository authRepository,
     required DashboardRepository dashboardRepository,
     required ProgressRepository progressRepository,
+    required DailyProgressReminderRepository dailyProgressReminderRepository,
     required ProgressRebuildService progressRebuildService,
     required MockTestRepository mockTestRepository,
     required Logger logger,
@@ -40,6 +42,7 @@ class SyncService {
         _authRepository = authRepository,
         _dashboardRepository = dashboardRepository,
         _progressRepository = progressRepository,
+        _dailyProgressReminderRepository = dailyProgressReminderRepository,
         _progressRebuildService = progressRebuildService,
         _mockTestRepository = mockTestRepository,
         _logger = logger;
@@ -50,6 +53,7 @@ class SyncService {
   final AuthRepository _authRepository;
   final DashboardRepository _dashboardRepository;
   final ProgressRepository _progressRepository;
+  final DailyProgressReminderRepository _dailyProgressReminderRepository;
   final ProgressRebuildService _progressRebuildService;
   final MockTestRepository _mockTestRepository;
   final Logger _logger;
@@ -141,7 +145,10 @@ class SyncService {
   }
 
   void _emit(SyncStep step, void Function(SyncProgress) onProgress,
-      {int current = 0, int total = 0, String? detail, List<SyncProgressItem>? steps}) {
+      {int current = 0,
+      int total = 0,
+      String? detail,
+      List<SyncProgressItem>? steps}) {
     onProgress(SyncProgress(
       step: step,
       current: current,
@@ -541,7 +548,8 @@ class SyncService {
     }
   }
 
-  Future<List<UserExamModel>> _resolveEnrollmentDownloadTargets(int? userExamId) async {
+  Future<List<UserExamModel>> _resolveEnrollmentDownloadTargets(
+      int? userExamId) async {
     var exams = await _dashboardRepository.resolveMyExamsFromCache();
     if (exams.isEmpty) {
       exams = await _dashboardRepository.getMyExams(forceRemote: true);
@@ -697,6 +705,10 @@ class SyncService {
           await _progressRepository.flushQueuedTopicProgress(item);
         } else if (action == 'LOG_STUDY_HOURS' || type == 'LOG_STUDY') {
           await _progressRepository.flushQueuedStudyLog(item);
+        } else if (action == 'NO_STUDY_DAY') {
+          await _dailyProgressReminderRepository.flushQueuedNoStudyDay(item);
+        } else if (action == 'DAILY_PROGRESS_REMINDER') {
+          await _dailyProgressReminderRepository.flushQueuedPreference(item);
         } else {
           await _offlineQueue.updateStatus(clientId, SyncQueueStatus.pending);
           continue;
@@ -764,7 +776,8 @@ class SyncService {
 
   /// Merge pending per-topic rows into one bulk upload per enrollment.
   Future<void> _coalesceTopicProgressToBulk() async {
-    final pending = List<Map<String, dynamic>>.from(_offlineQueue.processableItems);
+    final pending =
+        List<Map<String, dynamic>>.from(_offlineQueue.processableItems);
     final mergedByExam = <int, Map<int, _TopicProgressMerge>>{};
     final topicItemClientIds = <String>[];
 
@@ -910,9 +923,8 @@ class SyncService {
           forceRemote: false,
         );
         final subjectIds = subjects.map((s) => s.id).toSet();
-        final touched = catalog.affectedSubjectIds
-            .where(subjectIds.contains)
-            .toList();
+        final touched =
+            catalog.affectedSubjectIds.where(subjectIds.contains).toList();
         if (touched.isEmpty) continue;
         await _progressRepository.refreshSubjectDetailsFromCatalog(
           userExamId: exam.id,
@@ -952,7 +964,8 @@ class SyncService {
     _logger.i('[Download] ===== full download started =====');
 
     var stepItems = SyncProgress.fullDownloadTemplate();
-    _emitStepProgress(onProgress, stepItems, 'profile', step: SyncStep.userData);
+    _emitStepProgress(onProgress, stepItems, 'profile',
+        step: SyncStep.userData);
     stepItems = SyncProgress.withActiveStep(
       template: stepItems,
       activeId: 'profile',
@@ -963,7 +976,8 @@ class SyncService {
     try {
       await _authRepository.getMe();
     } catch (e, st) {
-      _logger.w('Profile refresh skipped before sync', error: e, stackTrace: st);
+      _logger.w('Profile refresh skipped before sync',
+          error: e, stackTrace: st);
     }
     _emitStepProgress(
       onProgress,
@@ -993,7 +1007,8 @@ class SyncService {
     try {
       stats.studyProgressRows = await syncBundle(incremental: false);
     } catch (e, st) {
-      _logger.w('Bundle sync failed, using legacy APIs', error: e, stackTrace: st);
+      _logger.w('Bundle sync failed, using legacy APIs',
+          error: e, stackTrace: st);
       await syncLegacyFallback();
     }
     _emitStepProgress(
@@ -1015,7 +1030,8 @@ class SyncService {
       subjectCount += (await _dashboardRepository.getVisibleSubjectsByExam(
         exam.examId,
         forceRemote: false,
-      )).length;
+      ))
+          .length;
     }
     if (subjectCount == 0) subjectCount = 1;
 
@@ -1057,8 +1073,7 @@ class SyncService {
       );
       for (final subject in subjects) {
         subjectIndex++;
-        final subjectDetail =
-            '$subjectIndex / $subjectCount — ${subject.name}';
+        final subjectDetail = '$subjectIndex / $subjectCount — ${subject.name}';
         _emitStepProgress(
           onProgress,
           stepItems,
@@ -1127,8 +1142,7 @@ class SyncService {
     ).steps!;
 
     await _progressRepository.applyTopicProgressTableToSubjectDetails();
-    stats.dailyStudyLogs =
-        await _progressRepository.downloadWeeklyStudyLogs();
+    stats.dailyStudyLogs = await _progressRepository.downloadWeeklyStudyLogs();
 
     await _mockTestRepository.clearOfflineCache();
     final mockTestTopicIds = _resolveMockTestTopicIds();
@@ -1187,7 +1201,8 @@ class SyncService {
             stats.questions += questionCount;
           }
         } catch (e, st) {
-          _logger.w('Mock test sync skipped $topicId', error: e, stackTrace: st);
+          _logger.w('Mock test sync skipped $topicId',
+              error: e, stackTrace: st);
         }
       }
       _emitStepProgress(
@@ -1284,11 +1299,12 @@ class SyncService {
       );
     } else if (myExams is List && myExams.isNotEmpty) {
       final existing = _store.getJson(LocalStore.dashboardKey);
-      final base = existing ?? <String, dynamic>{
-        'user': profileUser ?? {},
-        'subjectProgress': [],
-        'weeklyLogs': [],
-      };
+      final base = existing ??
+          <String, dynamic>{
+            'user': profileUser ?? {},
+            'subjectProgress': [],
+            'weeklyLogs': [],
+          };
       await _dashboardRepository.storeSyncedDashboard(
         Map<String, dynamic>.from(base),
         bundleMyExams: myExams,
@@ -1322,8 +1338,8 @@ class SyncService {
           final subjects = merged
               .whereType<Map<String, dynamic>>()
               .map(
-                (row) => SubjectProgressModel.fromJson(row)
-                    .toSubjectModel(examId),
+                (row) =>
+                    SubjectProgressModel.fromJson(row).toSubjectModel(examId),
               )
               .toList();
           if (subjects.isNotEmpty) {
@@ -1420,9 +1436,7 @@ class SyncService {
   }
 
   Future<void> _persistLastSyncTime(String? serverTime) async {
-    final parsed = serverTime != null
-        ? DateTime.tryParse(serverTime)
-        : null;
+    final parsed = serverTime != null ? DateTime.tryParse(serverTime) : null;
     await _store.setLastSyncTime(parsed ?? DateTime.now());
   }
 
@@ -1509,9 +1523,7 @@ class SyncService {
       final chapterSubject = <int, int>{};
       if (chapterList is List) {
         for (final raw in chapterList) {
-          if (raw is Map &&
-              raw['id'] is num &&
-              raw['subjectId'] is num) {
+          if (raw is Map && raw['id'] is num && raw['subjectId'] is num) {
             chapterSubject[(raw['id'] as num).toInt()] =
                 (raw['subjectId'] as num).toInt();
           }
@@ -1519,8 +1531,7 @@ class SyncService {
       }
       for (final raw in topics) {
         if (raw is Map && raw['chapterId'] is num) {
-          final subjectId =
-              chapterSubject[(raw['chapterId'] as num).toInt()];
+          final subjectId = chapterSubject[(raw['chapterId'] as num).toInt()];
           if (subjectId != null) ids.add(subjectId);
         }
       }
@@ -1543,7 +1554,8 @@ class SyncService {
   Future<void> refreshAll({bool force = true}) => manualSync();
 
   /// Deprecated — use [runBackgroundSync] or [scheduleBackgroundSync].
-  Future<void> fullInitialSync({bool incremental = false, bool force = false}) =>
+  Future<void> fullInitialSync(
+          {bool incremental = false, bool force = false}) =>
       runBackgroundSync(fullDownload: !incremental);
 
   Future<T> _timedDownloadStep<T>(
@@ -1587,7 +1599,8 @@ class SyncService {
   }) {
     final myExams = (data['myExams'] as List?)?.length;
     final changedProgress = (data['changedProgress'] as List?)?.length ?? 0;
-    final progressByExam = (data['subjectProgressByExamId'] as Map?)?.length ?? 0;
+    final progressByExam =
+        (data['subjectProgressByExamId'] as Map?)?.length ?? 0;
     final hasDashboard = data['dashboard'] != null;
     _logger.i(
       '[Download] bundle payload (incremental=$incremental): '

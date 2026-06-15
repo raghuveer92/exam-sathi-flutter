@@ -15,6 +15,7 @@ import 'core/di/injection_container.dart';
 import 'core/firebase/analytics_service.dart';
 import 'core/firebase/firebase_initializer.dart';
 import 'core/local/local_store.dart';
+import 'core/reminders/daily_progress_reminder_service.dart';
 import 'core/router/app_router.dart';
 import 'core/sync/sync_service.dart';
 import 'core/theme/app_theme.dart';
@@ -66,7 +67,6 @@ void main() async {
   }
 }
 
-
 class ExamSaathiApp extends StatefulWidget {
   const ExamSaathiApp({super.key});
 
@@ -87,6 +87,7 @@ class _ExamSaathiAppState extends State<ExamSaathiApp> {
       _authBloc.add(AuthCheckRequested());
     }
     _router = AppRouter.createRouter(_authBloc);
+    unawaited(GetIt.I<DailyProgressReminderService>().initialize());
   }
 
   @override
@@ -127,12 +128,15 @@ class _ExamSaathiAppState extends State<ExamSaathiApp> {
           theme: AppTheme.lightTheme,
           routerConfig: _router,
           builder: (context, child) {
+            final hosted = DailyProgressReminderHost(
+              child: child ?? const SizedBox.shrink(),
+            );
             if (kIsWeb) {
-              return child ?? const SizedBox.shrink();
+              return hosted;
             }
             return AnnotatedRegion<SystemUiOverlayStyle>(
               value: AppTheme.lightScreenOverlay,
-              child: child ?? const SizedBox.shrink(),
+              child: hosted,
             );
           },
         ),
@@ -178,7 +182,8 @@ class _CrashScreen extends StatelessWidget {
                   ),
                   child: Text(
                     error,
-                    style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                    style:
+                        const TextStyle(color: Colors.redAccent, fontSize: 13),
                   ),
                 ),
                 const SizedBox(height: 12),

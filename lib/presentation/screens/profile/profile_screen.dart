@@ -33,119 +33,125 @@ class ProfileScreen extends StatelessWidget {
           return Center(
             child: ConstrainedBox(
               constraints: BoxConstraints(
-                maxWidth: ResponsiveHelper.isDesktop(context) ? 700 : double.infinity,
+                maxWidth:
+                    ResponsiveHelper.isDesktop(context) ? 700 : double.infinity,
               ),
               child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                // Avatar
-                Center(
-                  child: Container(
-                    width: 90,
-                    height: 90,
-                    decoration: const BoxDecoration(
-                      gradient: AppColors.primaryGradient,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Center(
-                      child: Text(
-                        user?.firstName[0].toUpperCase() ?? 'S',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 36,
-                          fontWeight: FontWeight.w700,
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    // Avatar
+                    Center(
+                      child: Container(
+                        width: 90,
+                        height: 90,
+                        decoration: const BoxDecoration(
+                          gradient: AppColors.primaryGradient,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Center(
+                          child: Text(
+                            user?.firstName[0].toUpperCase() ?? 'S',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 36,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  user?.fullName ?? 'Student',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-                Text(
-                  user?.email ?? '',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                if (user?.selectedExamName != null) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(20),
+                    const SizedBox(height: 16),
+                    Text(
+                      user?.fullName ?? 'Student',
+                      style: Theme.of(context).textTheme.headlineMedium,
                     ),
-                    child: Text(
-                      user!.selectedExamName!,
-                      style: const TextStyle(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
+                    Text(
+                      user?.email ?? '',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    if (user?.selectedExamName != null) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          user!.selectedExamName!,
+                          style: const TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 32),
+                    // Streak stat
+                    if (user != null) ...[
+                      _StatRow(
+                        icon: Icons.local_fire_department_rounded,
+                        color: AppColors.streakFire,
+                        label: 'Study Streak',
+                        value: '${user.studyStreakDays} days',
+                      ),
+                      const Divider(height: 24),
+                    ],
+                    const Divider(height: 24),
+                    ManualSyncButton(
+                      onComplete: () => context
+                          .read<DashboardBloc>()
+                          .add(DashboardLoadRequested()),
+                    ),
+                    const SizedBox(height: 16),
+                    _ProfileTile(
+                      icon: Icons.refresh_rounded,
+                      label: 'Reset & Re-download',
+                      onTap: () => _confirmResetDownload(context),
+                    ),
+                    const SizedBox(height: 16),
+                    _ProfileTile(
+                      icon: Icons.school_outlined,
+                      label: 'My Exams',
+                      onTap: () =>
+                          AppNavigation.pushIfDifferent(context, '/my-exams'),
+                    ),
+                    _ProfileTile(
+                      icon: Icons.notifications_outlined,
+                      label: 'Daily Progress Reminder',
+                      onTap: () => AppNavigation.pushIfDifferent(
+                        context,
+                        '/daily-progress-reminder',
                       ),
                     ),
-                  ),
-                ],
-                const SizedBox(height: 32),
-                // Streak stat
-                if (user != null) ...[
-                  _StatRow(
-                    icon: Icons.local_fire_department_rounded,
-                    color: AppColors.streakFire,
-                    label: 'Study Streak',
-                    value: '${user.studyStreakDays} days',
-                  ),
-                  const Divider(height: 24),
-                ],
-                const Divider(height: 24),
-                ManualSyncButton(
-                  onComplete: () =>
-                      context.read<DashboardBloc>().add(DashboardLoadRequested()),
+                    _ProfileTile(
+                      icon: Icons.help_outline_rounded,
+                      label: 'Help & Support',
+                      onTap: () {},
+                    ),
+                    const Divider(height: 24),
+                    _ProfileTile(
+                      key: TestKeys.profileDeleteAccount,
+                      icon: Icons.delete_forever_outlined,
+                      label: 'Delete Account',
+                      color: AppColors.error,
+                      onTap: () => _confirmDeleteAccount(context),
+                    ),
+                    _ProfileTile(
+                      key: TestKeys.profileLogout,
+                      icon: Icons.logout_rounded,
+                      label: 'Logout',
+                      color: AppColors.error,
+                      onTap: () {
+                        context.read<AuthBloc>().add(AuthLogoutRequested());
+                        AppNavigation.goIfDifferent(context, '/login');
+                      },
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 16),
-                _ProfileTile(
-                  icon: Icons.refresh_rounded,
-                  label: 'Reset & Re-download',
-                  onTap: () => _confirmResetDownload(context),
-                ),
-                const SizedBox(height: 16),
-                _ProfileTile(
-                  icon: Icons.school_outlined,
-                  label: 'My Exams',
-                  onTap: () => AppNavigation.pushIfDifferent(context, '/my-exams'),
-                ),
-                _ProfileTile(
-                  icon: Icons.notifications_outlined,
-                  label: 'Notifications',
-                  onTap: () {},
-                ),
-                _ProfileTile(
-                  icon: Icons.help_outline_rounded,
-                  label: 'Help & Support',
-                  onTap: () {},
-                ),
-                const Divider(height: 24),
-                _ProfileTile(
-                  key: TestKeys.profileDeleteAccount,
-                  icon: Icons.delete_forever_outlined,
-                  label: 'Delete Account',
-                  color: AppColors.error,
-                  onTap: () => _confirmDeleteAccount(context),
-                ),
-                _ProfileTile(
-                  key: TestKeys.profileLogout,
-                  icon: Icons.logout_rounded,
-                  label: 'Logout',
-                  color: AppColors.error,
-                  onTap: () {
-                    context.read<AuthBloc>().add(AuthLogoutRequested());
-                    AppNavigation.goIfDifferent(context, '/login');
-                  },
-                ),
-              ],
-            ),
               ),
             ),
           );
@@ -228,10 +234,11 @@ class ProfileScreen extends StatelessWidget {
     final authState = context.read<AuthBloc>().state;
     final dashboardState = context.read<DashboardBloc>().state;
     final authUser = authState is AuthAuthenticated ? authState.user : null;
-    final dashboardUser =
-        dashboardState is DashboardLoaded ? dashboardState.dashboard.user : null;
-    final isGoogleAccount =
-        authUser?.isGoogleAccount == true || dashboardUser?.isGoogleAccount == true;
+    final dashboardUser = dashboardState is DashboardLoaded
+        ? dashboardState.dashboard.user
+        : null;
+    final isGoogleAccount = authUser?.isGoogleAccount == true ||
+        dashboardUser?.isGoogleAccount == true;
 
     if (isGoogleAccount) {
       await _confirmDeleteGoogleAccount(context);
@@ -428,7 +435,8 @@ class _GoogleDeleteConfirmDialog extends StatefulWidget {
       _GoogleDeleteConfirmDialogState();
 }
 
-class _GoogleDeleteConfirmDialogState extends State<_GoogleDeleteConfirmDialog> {
+class _GoogleDeleteConfirmDialogState
+    extends State<_GoogleDeleteConfirmDialog> {
   StreamSubscription<String>? _tokenSub;
 
   @override
@@ -530,7 +538,8 @@ class _ProfileTile extends StatelessWidget {
       key: key,
       contentPadding: EdgeInsets.zero,
       leading: Icon(icon, color: c),
-      title: Text(label, style: TextStyle(color: c, fontWeight: FontWeight.w500)),
+      title:
+          Text(label, style: TextStyle(color: c, fontWeight: FontWeight.w500)),
       trailing: color == null
           ? const Icon(Icons.chevron_right_rounded, color: AppColors.textHint)
           : null,

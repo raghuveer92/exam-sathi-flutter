@@ -7,6 +7,7 @@ import '../auth/google_auth_config.dart';
 import '../auth/google_auth_service.dart';
 import '../local/local_store.dart';
 import '../network/api_client.dart';
+import '../reminders/daily_progress_reminder_service.dart';
 import '../study/daily_target_calculator.dart';
 import '../sync/offline_queue_service.dart';
 import '../sync/progress_rebuild_service.dart';
@@ -15,6 +16,7 @@ import '../onboarding/onboarding_wizard_store.dart';
 import '../testing/integration_test_reset.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../data/repositories/dashboard_repository.dart';
+import '../../data/repositories/daily_progress_reminder_repository.dart';
 import '../../data/repositories/exam_catalog_repository.dart';
 import '../../data/repositories/mock_test_repository.dart';
 import '../../data/repositories/progress_repository.dart';
@@ -97,6 +99,16 @@ Future<void> setupDependencies() async {
         offlineQueue: sl<OfflineQueueService>(),
         logger: sl<Logger>(),
       ));
+  sl.registerLazySingleton<DailyProgressReminderRepository>(
+      () => DailyProgressReminderRepository(
+            store: sl<LocalStore>(),
+            offlineQueue: sl<OfflineQueueService>(),
+            client: sl<ApiClient>(),
+          ));
+  sl.registerLazySingleton<DailyProgressReminderService>(
+      () => DailyProgressReminderService(
+            repository: sl<DailyProgressReminderRepository>(),
+          ));
   sl.registerLazySingleton<ProgressRepository>(() => ProgressRepository(
         client: sl<ApiClient>(),
         store: sl<LocalStore>(),
@@ -107,16 +119,17 @@ Future<void> setupDependencies() async {
 
   sl.registerLazySingleton<SyncService>(() {
     final sync = SyncService(
-        store: sl<LocalStore>(),
-        syncRepository: sl<SyncRepository>(),
-        offlineQueue: sl<OfflineQueueService>(),
-        authRepository: sl<AuthRepository>(),
-        dashboardRepository: sl<DashboardRepository>(),
-        progressRepository: sl<ProgressRepository>(),
-        progressRebuildService: sl<ProgressRebuildService>(),
-        mockTestRepository: sl<MockTestRepository>(),
-        logger: sl<Logger>(),
-      );
+      store: sl<LocalStore>(),
+      syncRepository: sl<SyncRepository>(),
+      offlineQueue: sl<OfflineQueueService>(),
+      authRepository: sl<AuthRepository>(),
+      dashboardRepository: sl<DashboardRepository>(),
+      progressRepository: sl<ProgressRepository>(),
+      dailyProgressReminderRepository: sl<DailyProgressReminderRepository>(),
+      progressRebuildService: sl<ProgressRebuildService>(),
+      mockTestRepository: sl<MockTestRepository>(),
+      logger: sl<Logger>(),
+    );
     sl<OfflineQueueService>().onQueueChanged = sync.scheduleBackgroundSync;
     sync.startConnectivityListener();
     return sync;

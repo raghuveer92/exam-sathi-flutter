@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
+import 'package:get_it/get_it.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/subject_detail_model.dart';
@@ -10,6 +11,7 @@ import '../../core/local/api_call_tracker.dart';
 import '../../core/local/local_store.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
+import '../../core/reminders/daily_progress_reminder_service.dart';
 import '../../core/sync/local_tables.dart';
 import '../../core/sync/offline_queue_service.dart';
 import '../../core/sync/progress_rebuild_service.dart';
@@ -1525,6 +1527,12 @@ class ProgressRepository {
       'updatedAt': DateTime.now().toIso8601String(),
     };
     await _store.putJson(LocalTables.dailyStudyLogs, table);
+    if ((hoursDelta > 0 || topicsDelta > 0) && studyDate == _localTodayDate()) {
+      try {
+        unawaited(
+            GetIt.I<DailyProgressReminderService>().cancelTodayReminder());
+      } catch (_) {}
+    }
   }
 
   Future<void> markTopicProgressSynced({
