@@ -12,7 +12,6 @@ import '../../../core/utils/responsive_helper.dart';
 import '../../../data/models/mock_test_model.dart';
 import '../../../data/models/subject_detail_model.dart';
 import '../../../data/models/topic_model.dart';
-import '../../../data/repositories/daily_progress_reminder_repository.dart';
 import '../../../data/repositories/mock_test_repository.dart';
 import '../../../data/repositories/progress_repository.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
@@ -299,10 +298,6 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
         totalStudyHours: loggedHours,
         studyDate: _localTodayDate(),
       );
-      if (count > 0) {
-        await GetIt.I<DailyProgressReminderRepository>()
-            .markFirstTopicCompletedPromptPending();
-      }
       await _refreshFromCache();
       _exitSelectionMode();
       if (!mounted) return;

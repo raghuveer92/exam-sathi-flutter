@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/router/app_navigation.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/testing/test_keys.dart';
 import '../../../core/utils/responsive_helper.dart';
-import '../../blocs/dashboard/dashboard_bloc.dart';
 import '../../widgets/ads/web_ad_rail.dart';
 
 /// Main scaffold — persistent bottom navigation via [StatefulNavigationShell].
@@ -24,12 +22,6 @@ class MainScaffold extends StatelessWidget {
       index,
       toRoot: index == navigationShell.currentIndex,
     );
-    if (index == 0) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!context.mounted) return;
-        context.read<DashboardBloc>().add(DashboardRefreshRequested());
-      });
-    }
   }
 
   void _handleBack(BuildContext context) {

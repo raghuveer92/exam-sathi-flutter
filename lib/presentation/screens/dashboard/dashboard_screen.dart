@@ -131,12 +131,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       unawaited(
-        Navigator.of(context, rootNavigator: true).push<void>(
-          MaterialPageRoute<void>(
-            fullscreenDialog: true,
-            builder: (_) => const DailyProgressReminderIntroScreen(),
-          ),
-        ),
+        Future<void>.delayed(const Duration(seconds: 2), () async {
+          if (!mounted) return;
+          if (!_isDashboardVisible()) {
+            _reminderIntroScheduled = false;
+            return;
+          }
+          final repository = GetIt.I<DailyProgressReminderRepository>();
+          if (!repository.shouldShowReminderIntro()) {
+            _reminderIntroScheduled = false;
+            return;
+          }
+          await Navigator.of(context, rootNavigator: true).push<void>(
+            MaterialPageRoute<void>(
+              fullscreenDialog: true,
+              builder: (_) => const DailyProgressReminderIntroScreen(),
+            ),
+          );
+        }),
       );
     });
   }
