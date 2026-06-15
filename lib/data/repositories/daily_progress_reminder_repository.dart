@@ -72,13 +72,29 @@ class DailyProgressReminderRepository {
 
   bool shouldShowReminderIntro() {
     if (kIsWeb) return false;
+    if (_store.getString(LocalStore.dailyProgressReminderPromptPendingKey) !=
+        'true') {
+      return false;
+    }
     if (_store.hasSeenDailyProgressReminderIntro()) return false;
     if (getPreference().enabled) return false;
     return true;
   }
 
-  Future<void> markReminderIntroShown() =>
-      _store.markDailyProgressReminderIntroShown();
+  Future<void> markFirstTopicCompletedPromptPending() async {
+    if (kIsWeb) return;
+    if (_store.hasSeenDailyProgressReminderIntro()) return;
+    if (getPreference().enabled) return;
+    await _store.putString(
+      LocalStore.dailyProgressReminderPromptPendingKey,
+      'true',
+    );
+  }
+
+  Future<void> markReminderIntroShown() async {
+    await _store.markDailyProgressReminderIntroShown();
+    await _store.deleteKey(LocalStore.dailyProgressReminderPromptPendingKey);
+  }
 
   Future<void> flushQueuedPreference(Map<String, dynamic> item) async {
     final payload = item['payload'];

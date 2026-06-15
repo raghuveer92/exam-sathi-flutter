@@ -47,23 +47,6 @@ class _DailyProgressReminderScreenState
   }
 
   Future<void> _onToggleChanged(bool value) async {
-    if (value) {
-      final granted =
-          await GetIt.I<DailyProgressReminderService>().requestPermissions();
-      if (!mounted) return;
-      if (!granted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Notification permission is required to enable reminders. '
-              'You can allow it from system settings anytime.',
-            ),
-          ),
-        );
-        return;
-      }
-      await _repository.markReminderIntroShown();
-    }
     await _save(_preference.copyWith(enabled: value));
   }
 
