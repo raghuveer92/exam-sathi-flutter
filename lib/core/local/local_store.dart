@@ -23,7 +23,16 @@ class LocalStore {
   static const String cachedUserIdKey = 'cached_user_id';
   static const String dailyProgressReminderKey =
       'daily_progress_reminder_settings';
+  static const String dailyProgressReminderIntroShownKey =
+      'daily_progress_reminder_intro_shown';
   static const String dailyNoStudyDaysKey = 'daily_no_study_days';
+
+  bool hasSeenDailyProgressReminderIntro() =>
+      getString(dailyProgressReminderIntroShownKey) == 'true';
+
+  Future<void> markDailyProgressReminderIntroShown() async {
+    await putString(dailyProgressReminderIntroShownKey, 'true');
+  }
 
   Box<String>? _box;
 

@@ -87,7 +87,6 @@ class _ExamSaathiAppState extends State<ExamSaathiApp> {
       _authBloc.add(AuthCheckRequested());
     }
     _router = AppRouter.createRouter(_authBloc);
-    unawaited(GetIt.I<DailyProgressReminderService>().initialize());
   }
 
   @override

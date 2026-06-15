@@ -3,7 +3,7 @@ import 'package:intl/intl.dart';
 
 class DailyProgressReminderPreference {
   const DailyProgressReminderPreference({
-    this.enabled = true,
+    this.enabled = false,
     this.hour = 22,
     this.minute = 0,
     this.updatedAt,
@@ -22,7 +22,7 @@ class DailyProgressReminderPreference {
     return DailyProgressReminderPreference(
       enabled: json['enabled'] as bool? ??
           json['dailyProgressReminderEnabled'] as bool? ??
-          true,
+          false,
       hour: (json['hour'] as num?)?.toInt() ??
           parsed?.hour ??
           (json['reminderHour'] as num?)?.toInt() ??

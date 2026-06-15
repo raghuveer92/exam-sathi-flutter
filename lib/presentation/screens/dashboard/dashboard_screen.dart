@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -13,7 +14,9 @@ import '../../../core/testing/test_keys.dart';
 import '../../../data/models/dashboard_model.dart';
 import '../../../data/models/subject_progress_model.dart';
 import '../../../data/models/user_exam_model.dart';
+import '../../../data/repositories/daily_progress_reminder_repository.dart';
 import '../../../data/repositories/dashboard_repository.dart';
+import '../reminders/daily_progress_reminder_intro_screen.dart';
 import '../../blocs/dashboard/dashboard_bloc.dart';
 import '../../widgets/manual_sync_button.dart';
 import '../../widgets/dashboard/overall_progress_card.dart';
@@ -28,11 +31,13 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   static const Color _brandPrimary = Color(0xFF6C63FF);
   static const Color _brandSecondary = Color(0xFFFF8A00);
+  static const _isIntegrationTest = bool.fromEnvironment('INTEGRATION_TEST');
 
   final Map<int, List<SubjectProgressModel>> _subjectsByExam =
       <int, List<SubjectProgressModel>>{};
   bool _loadingSubjects = false;
   int _handledRefreshSequence = -1;
+  bool _reminderIntroScheduled = false;
 
   void _setStateSafely(VoidCallback updater) {
     if (!mounted) return;
@@ -110,6 +115,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  void _maybeShowReminderIntro() {
+    if (_isIntegrationTest || kIsWeb || _reminderIntroScheduled) return;
+    final repository = GetIt.I<DailyProgressReminderRepository>();
+    if (!repository.shouldShowReminderIntro()) return;
+
+    _reminderIntroScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        Navigator.of(context, rootNavigator: true).push<void>(
+          MaterialPageRoute<void>(
+            fullscreenDialog: true,
+            builder: (_) => const DailyProgressReminderIntroScreen(),
+          ),
+        ),
+      );
+    });
+  }
+
   Future<void> _loadSubjectsGroupedByExam(List<UserExamModel> exams) async {
     if (!mounted) return;
     _setStateSafely(() => _loadingSubjects = true);
@@ -165,6 +189,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted) {
                 unawaited(_reloadSubjectProgress(exams));
+                _maybeShowReminderIntro();
               }
             });
           }

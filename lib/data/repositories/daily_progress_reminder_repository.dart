@@ -29,7 +29,7 @@ class DailyProgressReminderRepository {
           (profile.containsKey('dailyProgressReminderEnabled') ||
               profile.containsKey('dailyProgressReminderTime'))) {
         return DailyProgressReminderPreference.fromJson({
-          'enabled': profile['dailyProgressReminderEnabled'] as bool? ?? true,
+          'enabled': false,
           'reminderTime':
               profile['dailyProgressReminderTime'] as String? ?? '22:00',
         });
@@ -58,12 +58,27 @@ class DailyProgressReminderRepository {
       final response = await _client.dio.get(ApiEndpoints.reminderPreference);
       final data = response.data['data'];
       if (data is Map<String, dynamic>) {
-        await _store.putJson(LocalStore.dailyProgressReminderKey, data);
+        final remote = DailyProgressReminderPreference.fromJson(data);
+        final current = getPreference();
+        await _store.putJson(
+          LocalStore.dailyProgressReminderKey,
+          remote.copyWith(enabled: current.enabled).toJson(),
+        );
       }
     } on DioException {
       // Offline is expected; local settings remain authoritative until sync.
     }
   }
+
+  bool shouldShowReminderIntro() {
+    if (kIsWeb) return false;
+    if (_store.hasSeenDailyProgressReminderIntro()) return false;
+    if (getPreference().enabled) return false;
+    return true;
+  }
+
+  Future<void> markReminderIntroShown() =>
+      _store.markDailyProgressReminderIntroShown();
 
   Future<void> flushQueuedPreference(Map<String, dynamic> item) async {
     final payload = item['payload'];

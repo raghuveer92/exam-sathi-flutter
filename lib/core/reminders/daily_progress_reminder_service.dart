@@ -48,8 +48,59 @@ class DailyProgressReminderService {
       init,
       onDidReceiveNotificationResponse: _handleNotificationResponse,
     );
-    await _requestPermissions();
     _initialized = true;
+  }
+
+  /// Requests notification (and optional exact-alarm) permission.
+  /// Call only after the user opts in — never during app launch or onboarding.
+  Future<bool> requestPermissions({bool requestExactAlarms = true}) async {
+    if (kIsWeb) return false;
+    await initialize();
+
+    final android = _notifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (android != null) {
+      final notificationsGranted =
+          await android.requestNotificationsPermission() ?? false;
+      if (!notificationsGranted) return false;
+      if (requestExactAlarms) {
+        await android.requestExactAlarmsPermission();
+      }
+      return true;
+    }
+
+    final ios = _notifications.resolvePlatformSpecificImplementation<
+        IOSFlutterLocalNotificationsPlugin>();
+    if (ios != null) {
+      return await ios.requestPermissions(
+            alert: true,
+            badge: true,
+            sound: true,
+          ) ??
+          false;
+    }
+
+    return false;
+  }
+
+  Future<bool> hasNotificationPermission() async {
+    if (kIsWeb) return false;
+    await initialize();
+
+    final android = _notifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (android != null) {
+      return await android.areNotificationsEnabled() ?? false;
+    }
+
+    final ios = _notifications.resolvePlatformSpecificImplementation<
+        IOSFlutterLocalNotificationsPlugin>();
+    if (ios != null) {
+      final settings = await ios.checkPermissions();
+      return settings?.isEnabled ?? false;
+    }
+
+    return false;
   }
 
   Future<void> refreshSchedule() async {
@@ -74,6 +125,12 @@ class DailyProgressReminderService {
   ) async {
     if (kIsWeb) return;
     await initialize();
+    if (!await hasNotificationPermission()) {
+      _logger.i(
+        '[DailyReminder] skipping schedule; notification permission not granted',
+      );
+      return;
+    }
     final now = DateTime.now();
     final scheduled = DateTime(
       now.year,
@@ -113,16 +170,6 @@ class DailyProgressReminderService {
     await initialize();
     await _notifications.cancel(_notificationId);
     _logger.i('[DailyReminder] cancelled notification $_notificationId');
-  }
-
-  Future<void> _requestPermissions() async {
-    final android = _notifications.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
-    await android?.requestNotificationsPermission();
-    await android?.requestExactAlarmsPermission();
-    final ios = _notifications.resolvePlatformSpecificImplementation<
-        IOSFlutterLocalNotificationsPlugin>();
-    await ios?.requestPermissions(alert: true, badge: true, sound: true);
   }
 
   Future<AndroidScheduleMode> _resolveAndroidScheduleMode() async {
