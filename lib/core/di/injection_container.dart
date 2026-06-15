@@ -108,6 +108,7 @@ Future<void> setupDependencies() async {
   sl.registerLazySingleton<DailyProgressReminderService>(
       () => DailyProgressReminderService(
             repository: sl<DailyProgressReminderRepository>(),
+            logger: sl<Logger>(),
           ));
   sl.registerLazySingleton<ProgressRepository>(() => ProgressRepository(
         client: sl<ApiClient>(),

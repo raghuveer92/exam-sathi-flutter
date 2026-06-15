@@ -6,6 +6,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
+import 'package:logger/logger.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -17,7 +18,9 @@ import '../router/app_navigation.dart';
 class DailyProgressReminderService {
   DailyProgressReminderService({
     required DailyProgressReminderRepository repository,
-  }) : _repository = repository;
+    Logger? logger,
+  })  : _repository = repository,
+        _logger = logger ?? Logger();
 
   static const int _notificationId = 2200;
   static const String _payload = 'daily_progress_reminder';
@@ -25,6 +28,7 @@ class DailyProgressReminderService {
   static const String _updateProgressAction = 'daily_progress_update';
 
   final DailyProgressReminderRepository _repository;
+  final Logger _logger;
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
   bool _initialized = false;
@@ -50,7 +54,15 @@ class DailyProgressReminderService {
 
   Future<void> refreshSchedule() async {
     final preference = _repository.getPreference();
-    if (!preference.enabled || !_repository.shouldRemindToday()) {
+    if (!preference.enabled) {
+      _logger.i('[DailyReminder] disabled; cancelling notification');
+      await cancelTodayReminder();
+      return;
+    }
+    if (!_repository.shouldRemindToday()) {
+      _logger.i(
+        '[DailyReminder] skipped; progress/no-study already recorded today',
+      );
       await cancelTodayReminder();
       return;
     }
@@ -71,9 +83,14 @@ class DailyProgressReminderService {
       preference.minute,
     );
     if (!scheduled.isAfter(now)) {
+      _logger.i(
+        '[DailyReminder] selected time ${preference.displayTime} has passed',
+      );
       await cancelTodayReminder();
       return;
     }
+
+    final scheduleMode = await _resolveAndroidScheduleMode();
 
     await _notifications.zonedSchedule(
       _notificationId,
@@ -81,8 +98,13 @@ class DailyProgressReminderService {
       'Looks like you haven\'t added any study progress today.',
       tz.TZDateTime.from(scheduled, tz.local),
       _details(),
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      androidScheduleMode: scheduleMode,
       payload: _payload,
+    );
+    final pending = await _notifications.pendingNotificationRequests();
+    _logger.i(
+      '[DailyReminder] scheduled ${scheduled.toIso8601String()} '
+      'mode=$scheduleMode pending=${pending.map((e) => e.id).toList()}',
     );
   }
 
@@ -90,15 +112,31 @@ class DailyProgressReminderService {
     if (kIsWeb) return;
     await initialize();
     await _notifications.cancel(_notificationId);
+    _logger.i('[DailyReminder] cancelled notification $_notificationId');
   }
 
   Future<void> _requestPermissions() async {
     final android = _notifications.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
     await android?.requestNotificationsPermission();
+    await android?.requestExactAlarmsPermission();
     final ios = _notifications.resolvePlatformSpecificImplementation<
         IOSFlutterLocalNotificationsPlugin>();
     await ios?.requestPermissions(alert: true, badge: true, sound: true);
+  }
+
+  Future<AndroidScheduleMode> _resolveAndroidScheduleMode() async {
+    final android = _notifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    final canScheduleExact =
+        await android?.canScheduleExactNotifications() ?? false;
+    if (canScheduleExact) {
+      return AndroidScheduleMode.exactAllowWhileIdle;
+    }
+    _logger.w(
+      '[DailyReminder] exact alarm permission unavailable; using inexact alarm',
+    );
+    return AndroidScheduleMode.inexactAllowWhileIdle;
   }
 
   NotificationDetails _details() {
