@@ -115,8 +115,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  bool _isDashboardVisible() {
+    final path =
+        GoRouter.of(context).routerDelegate.currentConfiguration.uri.path;
+    return AppNavigation.normalizeLocation(path) == '/home';
+  }
+
   void _maybeShowReminderIntro() {
     if (_isIntegrationTest || kIsWeb || _reminderIntroScheduled) return;
+    if (!_isDashboardVisible()) return;
     final repository = GetIt.I<DailyProgressReminderRepository>();
     if (!repository.shouldShowReminderIntro()) return;
 
@@ -290,14 +297,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: Column(
                 children: [
                   OverallProgressCard(
-          dashboard: dashboard,
-          dailyTargetHours: dailyTargetHours,
-        ),
+                    dashboard: dashboard,
+                    dailyTargetHours: dailyTargetHours,
+                  ),
                   const SizedBox(height: 18),
                   _MyExamsSection(
                     exams: exams,
                     onActivate: _activateExam,
-                    onViewAll: () => AppNavigation.pushIfDifferent(context, '/my-exams'),
+                    onViewAll: () =>
+                        AppNavigation.pushIfDifferent(context, '/my-exams'),
                     primary: _brandPrimary,
                   ),
                 ],
@@ -406,9 +414,11 @@ class PremiumDashboardCard extends StatelessWidget {
     final Color examColor = const Color(0xFF6C63FF); // fallback brand color
     final String examName = exam?.examName ?? 'Your Exam';
     final int dLeft = daysLeft ?? 0;
-    final double ratio = goalHours <= 0 ? 0.0 : (todayHours / goalHours).clamp(0.0, 1.0);
+    final double ratio =
+        goalHours <= 0 ? 0.0 : (todayHours / goalHours).clamp(0.0, 1.0);
     final int percent = (ratio * 100).round();
-    final String progressText = '${todayHours.toStringAsFixed(1)}h / ${goalHours.toStringAsFixed(goalHours.truncateToDouble() == goalHours ? 0 : 1)}h';
+    final String progressText =
+        '${todayHours.toStringAsFixed(1)}h / ${goalHours.toStringAsFixed(goalHours.truncateToDouble() == goalHours ? 0 : 1)}h';
     final bool syllabusComplete = overallPercent >= 99.5;
 
     return Container(
@@ -461,27 +471,35 @@ class PremiumDashboardCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        Icon(Icons.calendar_today_rounded, color: Colors.white70, size: 16),
+                        Icon(Icons.calendar_today_rounded,
+                            color: Colors.white70, size: 16),
                         const SizedBox(width: 4),
                         Text(
                           dLeft > 0 ? '$dLeft days left' : 'Exam soon!',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: Colors.white70,
-                                fontWeight: FontWeight.w600,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: Colors.white70,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                         ),
                         const SizedBox(width: 12),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.18),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.local_fire_department, color: Colors.orange, size: 16),
+                              const Icon(Icons.local_fire_department,
+                                  color: Colors.orange, size: 16),
                               const SizedBox(width: 3),
-                              Text('$streak day streak', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12)),
+                              Text('$streak day streak',
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 12)),
                             ],
                           ),
                         ),
@@ -492,7 +510,8 @@ class PremiumDashboardCard extends StatelessWidget {
               ),
               // Motivation badge
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.amberAccent.shade100.withOpacity(0.85),
                   borderRadius: BorderRadius.circular(16),
@@ -506,9 +525,14 @@ class PremiumDashboardCard extends StatelessWidget {
                 ),
                 child: Row(
                   children: const [
-                    Icon(Icons.emoji_events_rounded, color: Colors.deepOrange, size: 18),
+                    Icon(Icons.emoji_events_rounded,
+                        color: Colors.deepOrange, size: 18),
                     SizedBox(width: 5),
-                    Text('Premium', style: TextStyle(fontWeight: FontWeight.w800, color: Colors.deepOrange, fontSize: 13)),
+                    Text('Premium',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: Colors.deepOrange,
+                            fontSize: 13)),
                   ],
                 ),
               ),
@@ -533,10 +557,11 @@ class PremiumDashboardCard extends StatelessWidget {
                     ),
                     Text(
                       '$percent%',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            color: Colors.white,
-                          ),
+                      style:
+                          Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                              ),
                     ),
                   ],
                 ),
@@ -557,10 +582,11 @@ class PremiumDashboardCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       progressText,
-                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            color: Colors.white,
-                          ),
+                      style:
+                          Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                              ),
                     ),
                   ],
                 ),
@@ -601,7 +627,8 @@ class PremiumDashboardCard extends StatelessWidget {
                   child: LinearProgressIndicator(
                     value: overallPercent / 100,
                     backgroundColor: Colors.white24,
-                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                    valueColor:
+                        const AlwaysStoppedAnimation<Color>(Colors.white),
                     minHeight: 10,
                   ),
                 ),
@@ -722,7 +749,8 @@ class _ExamCard extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isNearest ? const Color(0xFFFF8A00) : const Color(0xFFEAEAF1),
+            color:
+                isNearest ? const Color(0xFFFF8A00) : const Color(0xFFEAEAF1),
             width: isNearest ? 1.6 : 1,
           ),
           boxShadow: [
