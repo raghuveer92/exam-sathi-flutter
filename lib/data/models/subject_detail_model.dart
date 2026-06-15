@@ -26,22 +26,27 @@ class SubjectDetailModel extends Equatable {
     required this.chapters,
   });
 
-  factory SubjectDetailModel.fromJson(Map<String, dynamic> json) =>
-      SubjectDetailModel(
-        subjectId: (json['subjectId'] as num).toInt(),
-        subjectName: json['subjectName'] as String,
-        iconName: (json['iconName'] as String?) ?? 'book',
-        colorCode: (json['colorCode'] as String?) ?? '#6C63FF',
-        totalTopics: (json['totalTopics'] as num?)?.toInt() ?? 0,
-        completedTopics: (json['completedTopics'] as num?)?.toInt() ?? 0,
-        completionPercent:
-            ((json['completionPercent'] as num?) ?? 0.0).toDouble(),
-        totalStudyHours:
-            ((json['totalStudyHours'] as num?) ?? 0.0).toDouble(),
-        chapters: (json['chapters'] as List<dynamic>? ?? [])
-            .map((c) => ChapterDetailModel.fromJson(c as Map<String, dynamic>))
-            .toList(),
-      );
+  factory SubjectDetailModel.fromJson(Map<String, dynamic> json) {
+    final chapters = (json['chapters'] as List<dynamic>? ?? [])
+        .map((c) => ChapterDetailModel.fromJson(c as Map<String, dynamic>))
+        .toList()
+      ..sort((a, b) {
+        return a.orderIndex.compareTo(b.orderIndex);
+      });
+
+    return SubjectDetailModel(
+      subjectId: (json['subjectId'] as num).toInt(),
+      subjectName: json['subjectName'] as String,
+      iconName: (json['iconName'] as String?) ?? 'book',
+      colorCode: (json['colorCode'] as String?) ?? '#6C63FF',
+      totalTopics: (json['totalTopics'] as num?)?.toInt() ?? 0,
+      completedTopics: (json['completedTopics'] as num?)?.toInt() ?? 0,
+      completionPercent:
+          ((json['completionPercent'] as num?) ?? 0.0).toDouble(),
+      totalStudyHours: ((json['totalStudyHours'] as num?) ?? 0.0).toDouble(),
+      chapters: chapters,
+    );
+  }
 
   Color get color {
     try {
@@ -95,20 +100,26 @@ class ChapterDetailModel extends Equatable {
     required this.topics,
   });
 
-  factory ChapterDetailModel.fromJson(Map<String, dynamic> json) =>
-      ChapterDetailModel(
-        id: (json['id'] as num).toInt(),
-        title: json['title'] as String,
-        description: json['description'] as String?,
-        orderIndex: (json['orderIndex'] as num?)?.toInt() ?? 0,
-        totalTopics: (json['totalTopics'] as num?)?.toInt() ?? 0,
-        completedTopics: (json['completedTopics'] as num?)?.toInt() ?? 0,
-        completionPercent:
-            ((json['completionPercent'] as num?) ?? 0.0).toDouble(),
-        topics: (json['topics'] as List<dynamic>? ?? [])
-            .map((t) => TopicModel.fromJson(t as Map<String, dynamic>))
-            .toList(),
-      );
+  factory ChapterDetailModel.fromJson(Map<String, dynamic> json) {
+    final topics = (json['topics'] as List<dynamic>? ?? [])
+        .map((t) => TopicModel.fromJson(t as Map<String, dynamic>))
+        .toList()
+      ..sort((a, b) {
+        return a.orderIndex.compareTo(b.orderIndex);
+      });
+
+    return ChapterDetailModel(
+      id: (json['id'] as num).toInt(),
+      title: json['title'] as String,
+      description: json['description'] as String?,
+      orderIndex: (json['orderIndex'] as num?)?.toInt() ?? 0,
+      totalTopics: (json['totalTopics'] as num?)?.toInt() ?? 0,
+      completedTopics: (json['completedTopics'] as num?)?.toInt() ?? 0,
+      completionPercent:
+          ((json['completionPercent'] as num?) ?? 0.0).toDouble(),
+      topics: topics,
+    );
+  }
 
   @override
   List<Object?> get props => [id, completedTopics];
