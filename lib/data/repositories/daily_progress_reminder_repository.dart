@@ -74,11 +74,32 @@ class DailyProgressReminderRepository {
     if (kIsWeb) return false;
     if (_store.hasSeenDailyProgressReminderIntro()) return false;
     if (getPreference().enabled) return false;
+    final snoozedUntilRaw = _store.getString(
+      LocalStore.dailyProgressReminderIntroSnoozedUntilKey,
+    );
+    final snoozedUntil = snoozedUntilRaw != null
+        ? DateTime.tryParse(snoozedUntilRaw)?.toLocal()
+        : null;
+    if (snoozedUntil != null && DateTime.now().isBefore(snoozedUntil)) {
+      return false;
+    }
     return true;
   }
 
-  Future<void> markReminderIntroShown() =>
-      _store.markDailyProgressReminderIntroShown();
+  Future<void> snoozeReminderIntro({
+    Duration duration = const Duration(hours: 1),
+  }) async {
+    await _store.putString(
+      LocalStore.dailyProgressReminderIntroSnoozedUntilKey,
+      DateTime.now().add(duration).toIso8601String(),
+    );
+  }
+
+  Future<void> markReminderIntroShown() async {
+    await _store.markDailyProgressReminderIntroShown();
+    await _store
+        .deleteKey(LocalStore.dailyProgressReminderIntroSnoozedUntilKey);
+  }
 
   Future<void> flushQueuedPreference(Map<String, dynamic> item) async {
     final payload = item['payload'];

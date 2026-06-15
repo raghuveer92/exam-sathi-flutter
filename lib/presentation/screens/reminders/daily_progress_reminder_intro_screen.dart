@@ -11,7 +11,7 @@ class DailyProgressReminderIntroScreen extends StatelessWidget {
   const DailyProgressReminderIntroScreen({super.key});
 
   Future<void> _onMaybeLater(BuildContext context) async {
-    await GetIt.I<DailyProgressReminderRepository>().markReminderIntroShown();
+    await GetIt.I<DailyProgressReminderRepository>().snoozeReminderIntro();
     if (context.mounted) Navigator.of(context).pop();
   }
 

@@ -28,7 +28,8 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen>
+    with WidgetsBindingObserver {
   static const Color _brandPrimary = Color(0xFF6C63FF);
   static const Color _brandSecondary = Color(0xFFFF8A00);
   static const _isIntegrationTest = bool.fromEnvironment('INTEGRATION_TEST');
@@ -55,12 +56,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     AnalyticsService.logDashboardViewed();
     final bloc = context.read<DashboardBloc>();
     if (bloc.state is DashboardInitial) {
       bloc.add(DashboardLoadRequested());
     } else {
       bloc.add(DashboardRefreshRequested());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _maybeShowReminderIntro();
     }
   }
 
@@ -148,6 +163,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               builder: (_) => const DailyProgressReminderIntroScreen(),
             ),
           );
+          _reminderIntroScheduled = false;
         }),
       );
     });

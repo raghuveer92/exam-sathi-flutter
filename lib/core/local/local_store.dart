@@ -25,6 +25,8 @@ class LocalStore {
       'daily_progress_reminder_settings';
   static const String dailyProgressReminderIntroShownKey =
       'daily_progress_reminder_intro_shown';
+  static const String dailyProgressReminderIntroSnoozedUntilKey =
+      'daily_progress_reminder_intro_snoozed_until';
   static const String dailyNoStudyDaysKey = 'daily_no_study_days';
 
   bool hasSeenDailyProgressReminderIntro() =>
