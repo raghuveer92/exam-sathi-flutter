@@ -31,22 +31,32 @@ jobs:
           distribution: temurin
 
       - name: Write google-services.json
-        run: printf '%s' '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
 
       - name: Write firebase_options.dart
-        run: printf '%s' '${{ secrets.FIREBASE_OPTIONS_DART }}' > lib/firebase_options.dart
+        env:
+          FIREBASE_OPTIONS_DART: ${{ secrets.FIREBASE_OPTIONS_DART }}
+        run: printf '%s' "$FIREBASE_OPTIONS_DART" > lib/firebase_options.dart
 
       - name: Decode upload keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          printf '%s' '${{ secrets.KEYSTORE_BASE64 }}' | base64 --decode > android/app/keystore.jks
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/keystore.jks
 
       - name: Write keystore.properties
+        env:
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           {
             printf '%s\n' 'storeFile=app/keystore.jks'
-            printf '%s\n' 'storePassword=${{ secrets.STORE_PASSWORD }}'
-            printf '%s\n' 'keyAlias=${{ secrets.KEY_ALIAS }}'
-            printf '%s\n' 'keyPassword=${{ secrets.KEY_PASSWORD }}'
+            printf 'storePassword=%s\n' "$STORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
           } > android/keystore.properties
 
       - name: Install dependencies
