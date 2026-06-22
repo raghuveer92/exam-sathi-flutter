@@ -53,7 +53,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           {
-            printf '%s\n' 'storeFile=app/keystore.jks'
+            printf '%s\n' 'storeFile=keystore.jks'
             printf 'storePassword=%s\n' "$STORE_PASSWORD"
             printf 'keyAlias=%s\n' "$KEY_ALIAS"
             printf 'keyPassword=%s\n' "$KEY_PASSWORD"
