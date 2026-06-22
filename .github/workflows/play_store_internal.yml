@@ -52,8 +52,16 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Compute release version
+        run: |
+          VERSION_NAME=$(sed -nE 's/^version:[[:space:]]*([^+]+).*/\1/p' pubspec.yaml)
+          VERSION_CODE=$((GITHUB_RUN_NUMBER + 13))
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "Building version $VERSION_NAME+$VERSION_CODE"
+
       - name: Build release app bundle
-        run: flutter build appbundle --release
+        run: flutter build appbundle --release --build-name "$VERSION_NAME" --build-number "$VERSION_CODE"
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
