@@ -12,9 +12,17 @@ class FirebaseInitializer {
   const FirebaseInitializer._();
 
   static Future<void> initialize() async {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
+    try {
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+      } else {
+        Firebase.app();
+      }
+    } on FirebaseException catch (e) {
+      if (e.code != 'duplicate-app') rethrow;
+    }
 
     // Analytics — enabled on all mobile builds (debug + release)
     await AnalyticsService.initialize();
