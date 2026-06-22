@@ -1,4 +1,4 @@
-package com.examsaathi.app
+package com.myexamsaathi
 
 import io.flutter.embedding.android.FlutterActivity
 
