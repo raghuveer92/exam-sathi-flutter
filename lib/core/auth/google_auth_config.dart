@@ -9,7 +9,7 @@ class GoogleAuthConfig {
   static const String webClientId = String.fromEnvironment(
     'GOOGLE_WEB_CLIENT_ID',
     defaultValue:
-        '705998749535-rg78efbe1kr64rppef6fd6vnpu98vvdj.apps.googleusercontent.com',
+        '1047754395690-mob559u60rvp310udbcegielag53r89k.apps.googleusercontent.com',
   );
 
   /// Android OAuth client (from Firebase / Google Cloud Console).
