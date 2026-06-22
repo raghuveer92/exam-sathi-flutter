@@ -1,4 +1,4 @@
-name: Play Store Closed Testing Release
+name: Play Store Testing Release
 
 on:
   push:
@@ -80,11 +80,11 @@ jobs:
           path: build/app/outputs/bundle/release/app-release.aab
           retention-days: 30
 
-      - name: Upload to Play Console closed testing
+      - name: Upload to Play Console testing tracks
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.myexamsaathi
           releaseFiles: build/app/outputs/bundle/release/app-release.aab
-          track: alpha
+          tracks: internal,alpha
           status: completed
