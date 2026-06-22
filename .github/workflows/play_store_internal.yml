@@ -1,0 +1,70 @@
+name: Play Store Internal Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build & upload AAB
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.29.3"
+          channel: stable
+          cache: true
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: temurin
+
+      - name: Write google-services.json
+        run: printf '%s' '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
+
+      - name: Write firebase_options.dart
+        run: printf '%s' '${{ secrets.FIREBASE_OPTIONS_DART }}' > lib/firebase_options.dart
+
+      - name: Decode upload keystore
+        run: |
+          printf '%s' '${{ secrets.KEYSTORE_BASE64 }}' | base64 --decode > android/app/keystore.jks
+
+      - name: Write keystore.properties
+        run: |
+          {
+            printf '%s\n' 'storeFile=app/keystore.jks'
+            printf '%s\n' 'storePassword=${{ secrets.STORE_PASSWORD }}'
+            printf '%s\n' 'keyAlias=${{ secrets.KEY_ALIAS }}'
+            printf '%s\n' 'keyPassword=${{ secrets.KEY_PASSWORD }}'
+          } > android/keystore.properties
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release app bundle
+        run: flutter build appbundle --release
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: exam-saathi-release-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          retention-days: 30
+
+      - name: Upload to Play Console internal testing
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.myexamsaathi
+          releaseFiles: build/app/outputs/bundle/release/app-release.aab
+          track: internal
+          status: draft
