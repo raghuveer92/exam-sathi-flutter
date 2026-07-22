@@ -18,8 +18,8 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.myexamsaathi"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = "27.0.12077973"
+    compileSdk = 36
+    ndkVersion = "29.0.13113456"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -48,7 +48,7 @@ android {
     defaultConfig {
         applicationId = "com.myexamsaathi"
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true

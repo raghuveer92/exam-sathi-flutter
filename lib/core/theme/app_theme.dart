@@ -46,7 +46,7 @@ class AppTheme {
           // SystemUiOverlayStyle throws UnimplementedError on web release.
           systemOverlayStyle: kIsWeb ? null : lightScreenOverlay,
         ),
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           color: AppColors.cardBg,
           elevation: 0,
           shape: RoundedRectangleBorder(
