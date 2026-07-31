@@ -35,6 +35,14 @@ jobs:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
 
+      - name: Validate Google Sign-In OAuth config
+        run: |
+          if ! grep -q '"client_type"[[:space:]]*:[[:space:]]*3' android/app/google-services.json; then
+            echo "android/app/google-services.json must include a web OAuth client (client_type: 3) for Google Sign-In."
+            echo "Enable Google Sign-In in Firebase, add the Play app signing SHA-1/SHA-256 for com.myexamsaathi, then re-download google-services.json and update GOOGLE_SERVICES_JSON."
+            exit 1
+          fi
+
       - name: Write firebase_options.dart
         env:
           FIREBASE_OPTIONS_DART: ${{ secrets.FIREBASE_OPTIONS_DART }}

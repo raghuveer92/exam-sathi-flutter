@@ -5,7 +5,6 @@ import '../../../core/router/app_navigation.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/testing/test_keys.dart';
 import '../../../core/utils/responsive_helper.dart';
-import '../../widgets/ads/web_ad_rail.dart';
 
 /// Main scaffold — persistent bottom navigation via [StatefulNavigationShell].
 ///
@@ -56,7 +55,6 @@ class MainScaffold extends StatelessWidget {
             ),
             const VerticalDivider(width: 1, color: AppColors.divider),
             Expanded(child: navigationShell),
-            if (WebAdRail.shouldShow(context)) const WebAdRail(),
           ],
         ),
       ),

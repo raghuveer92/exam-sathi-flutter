@@ -5,14 +5,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_adsense/flutter_adsense.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
-import 'core/ads/ad_config.dart';
-import 'core/auth/google_sign_in_web_registration.dart';
 import 'core/di/injection_container.dart';
 import 'core/firebase/analytics_service.dart';
+import 'core/firebase/crashlytics_service.dart';
 import 'core/firebase/firebase_initializer.dart';
 import 'core/local/local_store.dart';
 import 'core/reminders/daily_progress_reminder_service.dart';
@@ -30,9 +28,6 @@ const _isIntegrationTest = bool.fromEnvironment('INTEGRATION_TEST');
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Release web builds may tree-shake auto plugin registration; register explicitly.
-  registerGoogleSignInWebIfNeeded();
 
   // SystemChrome APIs throw UnimplementedError on web (async, uncaught in release).
   if (!kIsWeb) {
@@ -53,9 +48,6 @@ void main() async {
   };
 
   try {
-    if (kIsWeb && AdConfig.hasManualRail && !_isIntegrationTest) {
-      FlutterAdsense().initialize(AdConfig.clientId);
-    }
     if (!_isIntegrationTest) {
       await FirebaseInitializer.initialize();
       AnalyticsService.logAppOpen();
@@ -107,6 +99,7 @@ class _ExamSaathiAppState extends State<ExamSaathiApp> {
           if (state is AuthUnauthenticated) {
             context.read<DashboardBloc>().add(DashboardResetRequested());
             AnalyticsService.logLogout();
+            CrashlyticsService.clearUser();
           }
           if (state is AuthAuthenticated) {
             final store = GetIt.I<LocalStore>();

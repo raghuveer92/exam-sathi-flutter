@@ -93,6 +93,13 @@ class AuthGoogleSignInWithIdToken extends AuthEvent {
   List<Object?> get props => [idToken];
 }
 
+class AuthGoogleSignInFailed extends AuthEvent {
+  final String message;
+  const AuthGoogleSignInFailed(this.message);
+  @override
+  List<Object?> get props => [message];
+}
+
 class AuthDeleteAccountRequested extends AuthEvent {
   final String? password;
   final String? idToken;

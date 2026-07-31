@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:get_it/get_it.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
+import '../../../core/auth/google_auth_service.dart';
 import '../../../core/local/local_store.dart';
 import '../../../core/onboarding/onboarding_wizard_store.dart';
 import '../../../core/sync/offline_queue_service.dart';
@@ -19,9 +23,15 @@ const _isIntegrationTest = bool.fromEnvironment('INTEGRATION_TEST');
 
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final AuthRepository _authRepository;
+  final GoogleAuthService _googleAuth;
+  StreamSubscription<String>? _googleWebTokenSub;
+  StreamSubscription<Object>? _googleWebErrorSub;
 
-  AuthBloc({required AuthRepository authRepository})
-      : _authRepository = authRepository,
+  AuthBloc({
+    required AuthRepository authRepository,
+    required GoogleAuthService googleAuth,
+  })  : _authRepository = authRepository,
+        _googleAuth = googleAuth,
         super(AuthInitial()) {
     on<AuthCheckRequested>(_onCheckRequested);
     on<AuthLoginRequested>(_onLoginRequested);
@@ -29,13 +39,38 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<AuthVerifyEmailOtpRequested>(_onVerifyEmailOtpRequested);
     on<AuthResendEmailOtpRequested>(_onResendEmailOtpRequested);
     on<AuthForgotPasswordRequested>(_onForgotPasswordRequested);
-    on<AuthVerifyForgotPasswordOtpRequested>(_onVerifyForgotPasswordOtpRequested);
+    on<AuthVerifyForgotPasswordOtpRequested>(
+        _onVerifyForgotPasswordOtpRequested);
     on<AuthResetPasswordRequested>(_onResetPasswordRequested);
     on<AuthLogoutRequested>(_onLogoutRequested);
     on<AuthGoogleSignInRequested>(_onGoogleSignInRequested);
     on<AuthGoogleSignInWithIdToken>(_onGoogleSignInWithIdToken);
+    on<AuthGoogleSignInFailed>(
+        (event, emit) => emit(AuthError(message: event.message)));
     on<AuthDeleteAccountRequested>(_onDeleteAccountRequested);
-    on<AuthUserUpdated>((event, emit) => emit(AuthAuthenticated(user: event.user)));
+    on<AuthUserUpdated>(
+        (event, emit) => emit(AuthAuthenticated(user: event.user)));
+    _listenForWebGoogleCredentials();
+  }
+
+  void _listenForWebGoogleCredentials() {
+    if (!kIsWeb || !_googleAuth.isAvailable) return;
+
+    _googleWebTokenSub = _googleAuth.webIdTokens.listen((idToken) {
+      if (state is AuthAuthenticated) return;
+      add(AuthGoogleSignInWithIdToken(idToken));
+    });
+    _googleWebErrorSub = _googleAuth.webSignInErrors.listen((error) {
+      if (state is AuthAuthenticated) return;
+      add(AuthGoogleSignInFailed(_parseError(error)));
+    });
+  }
+
+  @override
+  Future<void> close() async {
+    await _googleWebTokenSub?.cancel();
+    await _googleWebErrorSub?.cancel();
+    return super.close();
   }
 
   Future<void> _onCheckRequested(
@@ -268,8 +303,8 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       final user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
       emit(AuthAuthenticated(user: user));
     } catch (e) {
-      final message = e.toString();
-      if (message.contains('cancelled') || message.contains('canceled')) {
+      if (e is StateError &&
+          (e.message.contains('cancelled') || e.message.contains('canceled'))) {
         emit(AuthUnauthenticated());
         return;
       }
@@ -295,7 +330,8 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     AuthDeleteAccountRequested event,
     Emitter<AuthState> emit,
   ) async {
-    final previous = state is AuthAuthenticated ? state as AuthAuthenticated : null;
+    final previous =
+        state is AuthAuthenticated ? state as AuthAuthenticated : null;
     try {
       await _authRepository.deleteAccount(
         password: event.password,
@@ -325,10 +361,15 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       }
     }
     if (e is GoogleSignInException) {
+      final details = e.details == null ? '' : ' Details: ${e.details}';
       if (e.code == GoogleSignInExceptionCode.canceled) {
-        return 'Sign in canceled';
+        return 'Google Sign-In did not complete after account selection (${e.code.name}). Check the Play app signing SHA in Firebase.$details';
       }
-      return e.description ?? 'Google Sign-In failed (${e.code.name})';
+      final description = e.description ?? 'Google Sign-In failed';
+      return '$description (${e.code.name}).$details';
+    }
+    if (e is TimeoutException) {
+      return 'Google Sign-In timed out after account selection. Please try again, then check Crashlytics logs for the GoogleSignIn Android breadcrumb.';
     }
     if (e is StateError) {
       return e.message;

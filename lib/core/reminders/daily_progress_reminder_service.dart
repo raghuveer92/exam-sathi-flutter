@@ -51,9 +51,9 @@ class DailyProgressReminderService {
     _initialized = true;
   }
 
-  /// Requests notification (and optional exact-alarm) permission.
+  /// Requests notification permission.
   /// Call only after the user opts in — never during app launch or onboarding.
-  Future<bool> requestPermissions({bool requestExactAlarms = true}) async {
+  Future<bool> requestPermissions() async {
     if (kIsWeb) return false;
     await initialize();
 
@@ -63,9 +63,6 @@ class DailyProgressReminderService {
       final notificationsGranted =
           await android.requestNotificationsPermission() ?? false;
       if (!notificationsGranted) return false;
-      if (requestExactAlarms) {
-        await android.requestExactAlarmsPermission();
-      }
       return true;
     }
 
@@ -147,21 +144,20 @@ class DailyProgressReminderService {
       return;
     }
 
-    final scheduleMode = await _resolveAndroidScheduleMode();
-
     await _notifications.zonedSchedule(
       _notificationId,
       'Daily Progress Reminder',
       'Looks like you haven\'t added any study progress today.',
       tz.TZDateTime.from(scheduled, tz.local),
       _details(),
-      androidScheduleMode: scheduleMode,
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       payload: _payload,
     );
     final pending = await _notifications.pendingNotificationRequests();
     _logger.i(
       '[DailyReminder] scheduled ${scheduled.toIso8601String()} '
-      'mode=$scheduleMode pending=${pending.map((e) => e.id).toList()}',
+      'mode=${AndroidScheduleMode.inexactAllowWhileIdle} '
+      'pending=${pending.map((e) => e.id).toList()}',
     );
   }
 
@@ -170,20 +166,6 @@ class DailyProgressReminderService {
     await initialize();
     await _notifications.cancel(_notificationId);
     _logger.i('[DailyReminder] cancelled notification $_notificationId');
-  }
-
-  Future<AndroidScheduleMode> _resolveAndroidScheduleMode() async {
-    final android = _notifications.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
-    final canScheduleExact =
-        await android?.canScheduleExactNotifications() ?? false;
-    if (canScheduleExact) {
-      return AndroidScheduleMode.exactAllowWhileIdle;
-    }
-    _logger.w(
-      '[DailyReminder] exact alarm permission unavailable; using inexact alarm',
-    );
-    return AndroidScheduleMode.inexactAllowWhileIdle;
   }
 
   NotificationDetails _details() {

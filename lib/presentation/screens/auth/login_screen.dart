@@ -1,13 +1,8 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:get_it/get_it.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/auth/google_auth_config.dart';
-import '../../../core/auth/google_auth_service.dart';
 import '../../../core/firebase/analytics_service.dart';
 import '../../../core/firebase/crashlytics_service.dart';
 import '../../../core/router/app_navigation.dart';
@@ -35,8 +30,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   bool _obscurePassword = true;
-  StreamSubscription? _googleWebTokenSub;
-  StreamSubscription? _googleWebErrorSub;
 
   static bool get _isLocalBackend {
     const url = ApiEndpoints.baseUrl;
@@ -50,32 +43,10 @@ class _LoginScreenState extends State<LoginScreen> {
       _emailCtrl.text = 'abc@gmail.comm';
       _passwordCtrl.text = 'Abc@123';
     }
-    if (kIsWeb && GoogleAuthConfig.isConfigured) {
-      _setupWebGoogleSignIn();
-    }
-  }
-
-  void _setupWebGoogleSignIn() {
-    final googleAuth = GetIt.I<GoogleAuthService>();
-    _googleWebTokenSub = googleAuth.webIdTokens.listen((idToken) {
-      if (!mounted) return;
-      context.read<AuthBloc>().add(AuthGoogleSignInWithIdToken(idToken));
-    });
-    _googleWebErrorSub = googleAuth.webSignInErrors.listen((e) {
-      if (!mounted) return;
-      final message = e is StateError
-          ? e.message
-          : 'Google Sign-In failed. Please try again.';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), backgroundColor: AppColors.error),
-      );
-    });
   }
 
   @override
   void dispose() {
-    _googleWebTokenSub?.cancel();
-    _googleWebErrorSub?.cancel();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
@@ -84,9 +55,9 @@ class _LoginScreenState extends State<LoginScreen> {
   void _login() {
     if (_formKey.currentState?.validate() != true) return;
     context.read<AuthBloc>().add(AuthLoginRequested(
-      email: _emailCtrl.text.trim(),
-      password: _passwordCtrl.text,
-    ));
+          email: _emailCtrl.text.trim(),
+          password: _passwordCtrl.text,
+        ));
   }
 
   void _googleSignIn() {
@@ -102,7 +73,7 @@ class _LoginScreenState extends State<LoginScreen> {
         listener: (context, state) {
           if (state is AuthAuthenticated) {
             AnalyticsService.logLogin();
-            CrashlyticsService.setUser(userId: state.user.id.toString(), email: state.user.email);
+            CrashlyticsService.setUser(userId: state.user.id.toString());
           }
           if (state is AuthRegistrationPending) {
             AppNavigation.goIfDifferent(
@@ -164,7 +135,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
                     prefixIcon: Icons.email_outlined,
                     validator: (v) {
-                      if (v == null || v.isEmpty) return AppStrings.fieldRequired;
+                      if (v == null || v.isEmpty) {
+                        return AppStrings.fieldRequired;
+                      }
                       if (!v.contains('@')) return AppStrings.invalidEmail;
                       return null;
                     },
@@ -190,7 +163,9 @@ class _LoginScreenState extends State<LoginScreen> {
                           setState(() => _obscurePassword = !_obscurePassword),
                     ),
                     validator: (v) {
-                      if (v == null || v.isEmpty) return AppStrings.fieldRequired;
+                      if (v == null || v.isEmpty) {
+                        return AppStrings.fieldRequired;
+                      }
                       if (v.length < 6) return AppStrings.passwordTooShort;
                       return null;
                     },
@@ -199,7 +174,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
-                      onPressed: () => AppNavigation.goIfDifferent(context, '/forgot-password'),
+                      onPressed: () => AppNavigation.goIfDifferent(
+                          context, '/forgot-password'),
                       child: const Text(AppStrings.forgotPassword),
                     ),
                   ),
@@ -218,6 +194,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       isLoading: state is AuthLoading,
                       onPressed: _googleSignIn,
                     ),
+                    if (state is AuthError) ...[
+                      const SizedBox(height: 12),
+                      _AuthErrorPanel(message: state.message),
+                    ],
                   ],
                   const SizedBox(height: 20),
                   Row(
@@ -229,10 +209,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       GestureDetector(
                         key: TestKeys.signUpLink,
-                        onTap: () => AppNavigation.goIfDifferent(context, '/register'),
-                        child: Text(
+                        onTap: () =>
+                            AppNavigation.goIfDifferent(context, '/register'),
+                        child: const Text(
                           AppStrings.signUp,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: AppColors.primary,
                             fontWeight: FontWeight.w600,
                           ),
@@ -245,6 +226,46 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _AuthErrorPanel extends StatelessWidget {
+  final String message;
+
+  const _AuthErrorPanel({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.error.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.error.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.error_outline,
+            color: AppColors.error,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 13,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

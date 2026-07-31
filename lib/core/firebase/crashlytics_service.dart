@@ -13,8 +13,7 @@ class CrashlyticsService {
         .setCrashlyticsCollectionEnabled(!kDebugMode);
 
     // Forward Flutter framework errors
-    FlutterError.onError =
-        FirebaseCrashlytics.instance.recordFlutterFatalError;
+    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
 
     // Forward uncaught async / isolate errors
     PlatformDispatcher.instance.onError = (error, stack) {
@@ -26,13 +25,9 @@ class CrashlyticsService {
   /// Attach the authenticated user's ID to crash reports.
   static Future<void> setUser({
     required String userId,
-    String? email,
   }) async {
     if (kDebugMode) return;
     await FirebaseCrashlytics.instance.setUserIdentifier(userId);
-    if (email != null) {
-      await FirebaseCrashlytics.instance.setCustomKey('email', email);
-    }
   }
 
   /// Remove the user after logout.

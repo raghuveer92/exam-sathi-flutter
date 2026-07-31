@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
+import '../firebase/crashlytics_service.dart';
 import 'google_auth_config.dart';
 
 /// Wraps Google Sign-In and returns an idToken for backend verification.
@@ -36,10 +37,19 @@ class GoogleAuthService {
 
   Future<void> _initOnce() async {
     try {
+      if (kDebugMode) {
+        debugPrint('[GoogleAuthService] initialize platform web=$kIsWeb');
+      }
+      unawaited(CrashlyticsService.log(
+        'GoogleSignIn initialize web=$kIsWeb androidOverride=${GoogleAuthConfig.androidServerClientId.isNotEmpty}',
+      ));
       await GoogleSignIn.instance.initialize(
         clientId: kIsWeb ? GoogleAuthConfig.webClientId : null,
-        // serverClientId is Android/iOS only — web asserts if this is set.
-        serverClientId: kIsWeb ? null : GoogleAuthConfig.webClientId,
+        // Android reads default_web_client_id from google-services.json unless
+        // a build-time override is explicitly provided.
+        serverClientId: kIsWeb || GoogleAuthConfig.androidServerClientId.isEmpty
+            ? null
+            : GoogleAuthConfig.androidServerClientId,
       );
     } on StateError catch (e) {
       // Hot restart on web: GIS script may already be loaded in the page.
@@ -87,19 +97,40 @@ class GoogleAuthService {
     }
 
     try {
+      if (kDebugMode) {
+        debugPrint('[GoogleAuthService] Android authenticate started');
+      }
+      unawaited(
+          CrashlyticsService.log('GoogleSignIn Android authenticate started'));
+
       final account = await GoogleSignIn.instance.authenticate(
         scopeHint: const ['email', 'profile'],
+      ).timeout(
+        const Duration(seconds: 25),
+        onTimeout: () => throw TimeoutException(
+          'Google Sign-In did not return after account selection',
+          const Duration(seconds: 25),
+        ),
       );
 
       final idToken = account.authentication.idToken;
+      if (kDebugMode) {
+        debugPrint(
+          '[GoogleAuthService] Android authenticate completed idToken=${idToken != null && idToken.isNotEmpty}',
+        );
+      }
+      unawaited(CrashlyticsService.log(
+        'GoogleSignIn Android authenticate completed idToken=${idToken != null && idToken.isNotEmpty}',
+      ));
       if (idToken == null || idToken.isEmpty) {
         throw StateError('Google Sign-In did not return an idToken');
       }
       return idToken;
-    } on GoogleSignInException catch (e) {
-      if (e.code == GoogleSignInExceptionCode.canceled) {
-        return null;
+    } catch (e, stackTrace) {
+      if (kDebugMode) {
+        debugPrint('[GoogleAuthService] Android authenticate failed: $e');
       }
+      unawaited(CrashlyticsService.recordError(e, stackTrace));
       rethrow;
     }
   }

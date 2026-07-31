@@ -1,13 +1,8 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:get_it/get_it.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/auth/google_auth_config.dart';
-import '../../../core/auth/google_auth_service.dart';
 import '../../../core/router/app_navigation.dart';
 import '../../blocs/auth/auth_bloc.dart';
 import '../../../core/constants/app_colors.dart';
@@ -34,38 +29,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   bool _obscurePassword = true;
-  StreamSubscription? _googleWebTokenSub;
-  StreamSubscription? _googleWebErrorSub;
-
-  @override
-  void initState() {
-    super.initState();
-    if (kIsWeb && GoogleAuthConfig.isConfigured) {
-      _setupWebGoogleSignIn();
-    }
-  }
-
-  void _setupWebGoogleSignIn() {
-    final googleAuth = GetIt.I<GoogleAuthService>();
-    _googleWebTokenSub = googleAuth.webIdTokens.listen((idToken) {
-      if (!mounted) return;
-      context.read<AuthBloc>().add(AuthGoogleSignInWithIdToken(idToken));
-    });
-    _googleWebErrorSub = googleAuth.webSignInErrors.listen((e) {
-      if (!mounted) return;
-      final message = e is StateError
-          ? e.message
-          : 'Google Sign-In failed. Please try again.';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), backgroundColor: AppColors.error),
-      );
-    });
-  }
 
   @override
   void dispose() {
-    _googleWebTokenSub?.cancel();
-    _googleWebErrorSub?.cancel();
     _nameCtrl.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
@@ -76,11 +42,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void _register() {
     if (_formKey.currentState?.validate() != true) return;
     context.read<AuthBloc>().add(AuthRegisterRequested(
-      fullName: _nameCtrl.text.trim(),
-      email: _emailCtrl.text.trim(),
-      password: _passwordCtrl.text,
-      phone: _phoneCtrl.text.trim().isEmpty ? null : _phoneCtrl.text.trim(),
-    ));
+          fullName: _nameCtrl.text.trim(),
+          email: _emailCtrl.text.trim(),
+          password: _passwordCtrl.text,
+          phone: _phoneCtrl.text.trim().isEmpty ? null : _phoneCtrl.text.trim(),
+        ));
   }
 
   void _googleSignIn() {
@@ -134,103 +100,109 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     textAlign: isWide ? TextAlign.center : TextAlign.start,
                   ),
                   SizedBox(height: isWide ? 24 : 32),
-                    AppTextField(
-                      fieldKey: TestKeys.registerName,
-                      controller: _nameCtrl,
-                      label: AppStrings.fullName,
-                      hint: 'Aarav Sharma',
-                      prefixIcon: Icons.person_outline,
-                      validator: (v) =>
-                          (v == null || v.isEmpty) ? AppStrings.fieldRequired : null,
-                    ),
-                    const SizedBox(height: 16),
-                    AppTextField(
-                      fieldKey: TestKeys.registerEmail,
-                      controller: _emailCtrl,
-                      label: AppStrings.email,
-                      hint: 'you@example.com',
-                      keyboardType: TextInputType.emailAddress,
-                      textInputAction: TextInputAction.next,
-                      onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
-                      prefixIcon: Icons.email_outlined,
-                      validator: (v) {
-                        if (v == null || v.isEmpty) return AppStrings.fieldRequired;
-                        if (!v.contains('@')) return AppStrings.invalidEmail;
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    AppTextField(
-                      fieldKey: TestKeys.registerPassword,
-                      controller: _passwordCtrl,
-                      label: AppStrings.password,
-                      hint: 'Min 6 characters',
-                      obscureText: _obscurePassword,
-                      textInputAction: TextInputAction.done,
-                      onFieldSubmitted: (_) => _register(),
-                      prefixIcon: Icons.lock_outline,
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscurePassword
-                              ? Icons.visibility_outlined
-                              : Icons.visibility_off_outlined,
-                          color: AppColors.textHint,
-                        ),
-                        onPressed: () =>
-                            setState(() => _obscurePassword = !_obscurePassword),
+                  AppTextField(
+                    fieldKey: TestKeys.registerName,
+                    controller: _nameCtrl,
+                    label: AppStrings.fullName,
+                    hint: 'Aarav Sharma',
+                    prefixIcon: Icons.person_outline,
+                    validator: (v) => (v == null || v.isEmpty)
+                        ? AppStrings.fieldRequired
+                        : null,
+                  ),
+                  const SizedBox(height: 16),
+                  AppTextField(
+                    fieldKey: TestKeys.registerEmail,
+                    controller: _emailCtrl,
+                    label: AppStrings.email,
+                    hint: 'you@example.com',
+                    keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
+                    onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
+                    prefixIcon: Icons.email_outlined,
+                    validator: (v) {
+                      if (v == null || v.isEmpty) {
+                        return AppStrings.fieldRequired;
+                      }
+                      if (!v.contains('@')) return AppStrings.invalidEmail;
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  AppTextField(
+                    fieldKey: TestKeys.registerPassword,
+                    controller: _passwordCtrl,
+                    label: AppStrings.password,
+                    hint: 'Min 6 characters',
+                    obscureText: _obscurePassword,
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) => _register(),
+                    prefixIcon: Icons.lock_outline,
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                        color: AppColors.textHint,
                       ),
-                      validator: (v) {
-                        if (v == null || v.isEmpty) return AppStrings.fieldRequired;
-                        if (v.length < 6) return AppStrings.passwordTooShort;
-                        return null;
-                      },
+                      onPressed: () =>
+                          setState(() => _obscurePassword = !_obscurePassword),
                     ),
-                    const SizedBox(height: 16),
-                    AppTextField(
-                      controller: _phoneCtrl,
-                      label: 'Phone (optional)',
-                      hint: '+91 98765 43210',
-                      keyboardType: TextInputType.phone,
-                      prefixIcon: Icons.phone_outlined,
-                    ),
-                    const SizedBox(height: 32),
-                    if (googleEnabled) ...[
-                      GoogleSignInButton(
-                        isLoading: state is AuthLoading,
-                        onPressed: _googleSignIn,
-                        isSignUp: true,
-                      ),
-                      const SizedBox(height: 20),
-                      const AuthOrDivider(),
-                      const SizedBox(height: 20),
-                    ],
-                    GradientButton(
-                      key: TestKeys.registerSubmit,
-                      label: 'Create Account',
+                    validator: (v) {
+                      if (v == null || v.isEmpty) {
+                        return AppStrings.fieldRequired;
+                      }
+                      if (v.length < 6) return AppStrings.passwordTooShort;
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  AppTextField(
+                    controller: _phoneCtrl,
+                    label: 'Phone (optional)',
+                    hint: '+91 98765 43210',
+                    keyboardType: TextInputType.phone,
+                    prefixIcon: Icons.phone_outlined,
+                  ),
+                  const SizedBox(height: 32),
+                  if (googleEnabled) ...[
+                    GoogleSignInButton(
                       isLoading: state is AuthLoading,
-                      onPressed: _register,
+                      onPressed: _googleSignIn,
+                      isSignUp: true,
                     ),
-                    const SizedBox(height: 24),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          AppStrings.alreadyHaveAccount,
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                        GestureDetector(
-                          onTap: () => AppNavigation.goIfDifferent(context, '/login'),
-                          child: const Text(
-                            AppStrings.signIn,
-                            style: TextStyle(
-                              color: AppColors.primary,
-                              fontWeight: FontWeight.w600,
-                            ),
+                    const SizedBox(height: 20),
+                    const AuthOrDivider(),
+                    const SizedBox(height: 20),
+                  ],
+                  GradientButton(
+                    key: TestKeys.registerSubmit,
+                    label: 'Create Account',
+                    isLoading: state is AuthLoading,
+                    onPressed: _register,
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        AppStrings.alreadyHaveAccount,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      GestureDetector(
+                        onTap: () =>
+                            AppNavigation.goIfDifferent(context, '/login'),
+                        child: const Text(
+                          AppStrings.signIn,
+                          style: TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
                 ],
               ),
             ),

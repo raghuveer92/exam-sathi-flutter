@@ -1,7 +1,7 @@
 name: student_app_flutter
 description: ExamSaathi - Student Study Tracking Mobile App
 publish_to: none
-version: 1.0.0+12
+version: 1.0.0+13
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -50,7 +50,6 @@ dependencies:
   logger: ^2.4.0
 
   cupertino_icons: ^1.0.8
-  flutter_adsense: ^1.0.0
   google_sign_in: ^7.2.0
   google_sign_in_web: ^1.1.0
   flutter_local_notifications: ^19.5.0

@@ -139,8 +139,10 @@ Future<void> setupDependencies() async {
   sl.registerLazySingleton<OnboardingWizardStore>(
       () => OnboardingWizardStore());
 
-  sl.registerLazySingleton<AuthBloc>(
-      () => AuthBloc(authRepository: sl<AuthRepository>()));
+  sl.registerLazySingleton<AuthBloc>(() => AuthBloc(
+        authRepository: sl<AuthRepository>(),
+        googleAuth: sl<GoogleAuthService>(),
+      ));
   sl.registerFactory<DashboardBloc>(() => DashboardBloc(
         repository: sl<DashboardRepository>(),
         progressRebuildService: sl<ProgressRebuildService>(),

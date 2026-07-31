@@ -1,44 +1,45 @@
 {
   "project_info": {
-    "project_number": "888079860458",
-    "project_id": "exam-saathi-student",
-    "storage_bucket": "exam-saathi-student.firebasestorage.app"
+    "project_number": "1047754395690",
+    "project_id": "exam-sathi-c6b81",
+    "storage_bucket": "exam-sathi-c6b81.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:888079860458:android:71ba289626ea4af65e0d93",
+        "mobilesdk_app_id": "1:1047754395690:android:158699d0d52374efcc3353",
         "android_client_info": {
           "package_name": "com.examsaathi.app"
         }
       },
-      "oauth_client": [
-        {
-          "client_id": "705998749535-k8bolj448ag0es1rsg0njiqfd128m7ph.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.examsaathi.app",
-            "certificate_hash": "c974a521a150c6618cb659b887ae80d7546b9f5b"
-          }
-        },
-        {
-          "client_id": "705998749535-rg78efbe1kr64rppef6fd6vnpu98vvdj.apps.googleusercontent.com",
-          "client_type": 3
-        }
-      ],
+      "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBZHwL4n3ier1gewZKAkc8f3R1y_3N10Fs"
+          "current_key": "AIzaSyCjH4BSHHIhNyFt--QOK-3p9yJHFI33Nrg"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": [
-            {
-              "client_id": "705998749535-rg78efbe1kr64rppef6fd6vnpu98vvdj.apps.googleusercontent.com",
-              "client_type": 3
-            }
-          ]
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1047754395690:android:5a6582cfe547b7dbcc3353",
+        "android_client_info": {
+          "package_name": "com.myexamsaathi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCjH4BSHHIhNyFt--QOK-3p9yJHFI33Nrg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
         }
       }
     }
